@@ -973,6 +973,90 @@ await test('github_status surfaces a token-check failure without failing the too
 // 5. Writes and approval
 // ---------------------------------------------------------------------------
 
+const WRITE_CASES = [
+  ['github_create_issue', { repo: REPO, title: 'A title' }, `/repos/${REPO}/issues`],
+  ['github_comment', { repo: REPO, number: 1, body: 'A comment' }, `/repos/${REPO}/issues/1/comments`],
+  ['github_create_pull_request', { repo: REPO, title: 'A title', head: 'feature', base: 'main' }, `/repos/${REPO}/pulls`],
+]
+
+for (const [name, args, endpoint] of WRITE_CASES) {
+  await test(`${name}: defaults and explicit write denial block every request`, async () => {
+    for (const rawConfig of [{}, { allowWrites: false, requireApproval: true }, { allowWrites: false, requireApproval: false }]) {
+      const approval = approvalStub('allowed-once')
+      const harness = createHarness(rawConfig, { approval })
+      await callToolFails(harness, name, args, /GitHub writes are disabled/)
+      assert.equal(approval.calls.length, 0)
+      assert.equal(harness.calls.length, 0)
+    }
+  })
+
+  await test(`${name}: every write waits for its own allowed-once approval`, async () => {
+    const pending = []
+    let approvalRequested
+    const harness = createHarness({ allowWrites: true }, {
+      approval: { request: (request) => new Promise((resolve) => {
+        pending.push({ request, resolve })
+        approvalRequested()
+      }) },
+      router: routerOf({ [`POST ${endpoint}`]: () => jsonResponse({ number: 1, id: 1 }) }),
+    })
+    for (let i = 0; i < 2; i += 1) {
+      const requested = new Promise((resolve) => { approvalRequested = resolve })
+      const result = callTool(harness, name, args)
+      await Promise.race([requested, result.then(() => { throw new Error('write completed without waiting for approval') })])
+      assert.equal(harness.calls.length, i, 'no new fetch while approval is pending')
+      assert.equal(pending[i].request.toolName, name)
+      pending[i].resolve('allowed-once')
+      await result
+      assert.equal(harness.calls.length, i + 1)
+      assert.equal(harness.calls[i].method, 'POST')
+      assert.equal(harness.calls[i].parsed.pathname, endpoint)
+    }
+    assert.equal(pending.length, 2, 'approval is not reused across writes')
+  })
+
+  await test(`${name}: denied, cancelled, unavailable, and unexpected approvals send no request`, async () => {
+    for (const outcome of ['rejected', 'cancelled', 'unavailable', 'allowed-always', undefined, null]) {
+      const approval = approvalStub(outcome)
+      const harness = createHarness({ allowWrites: true }, { approval })
+      await callToolFails(harness, name, args, /not approved/)
+      assert.equal(approval.calls.length, 1)
+      assert.equal(harness.calls.length, 0, `no fetch for ${String(outcome)}`)
+    }
+  })
+
+  await test(`${name}: missing or failing approval services fail closed without bypass advice`, async () => {
+    for (const mode of ['missing', 'lookup-error', 'request-error']) {
+      const harness = createHarness({ allowWrites: true }, {
+        approval: mode === 'request-error' ? approvalStub(new Error('service offline')) : undefined,
+      })
+      if (mode === 'lookup-error') harness.ctx.get = () => { throw new Error('service offline') }
+      const error = await callToolFails(harness, name, args,
+        mode === 'request-error' ? /GitHub write approval failed/ : /no approval service/)
+      assert.equal(harness.calls.length, 0)
+      assert.doesNotMatch(error.message, /requireApproval:\s*false|allow unconfirmed writes/)
+      if (mode !== 'request-error') {
+        includes(error.message, 'No GitHub write request was sent')
+        includes(error.message, 'Restore the Harness approval service')
+      }
+    }
+  })
+
+  await test(`${name}: explicit approval opt-out permits writes without a service or agent`, async () => {
+    for (const approval of [undefined, approvalStub('rejected')]) {
+      const harness = createHarness({ allowWrites: true, requireApproval: false }, {
+        approval,
+        router: routerOf({ [`POST ${endpoint}`]: () => jsonResponse({ number: 1, id: 1 }) }),
+      })
+      await callTool(harness, name, args, { signal: new AbortController().signal })
+      assert.equal(approval?.calls.length ?? 0, 0)
+      assert.equal(harness.calls.length, 1)
+      assert.equal(harness.calls[0].method, 'POST')
+      assert.equal(harness.calls[0].parsed.pathname, endpoint)
+    }
+  })
+}
+
 await test('writes are rejected before any fetch when allowWrites is false', async () => {
   const cases = [
     ['github_create_issue', { repo: REPO, title: 'A title' }],
@@ -1816,6 +1900,60 @@ await test('apply registers scope-aware system-prompt guidance', () => {
   assert.equal(hiddenSections[0].text({ scope: undefined }), '', 'the section is empty when no github tool is visible')
 })
 
+await test('system-prompt policy follows live settings in both directions without re-apply', () => {
+  const sections = []
+  const ctx = fakeCtx({ services: { systemPrompt: { section: (section) => sections.push(section) } } })
+  ctx.tools.get = () => ({})
+  const parsed = internals.Config({})
+  const write = Symbol.for('cosmokit.volatile.write')
+  apply(ctx, parsed)
+  const prompt = () => sections[0].text({ scope: undefined })
+  includes(prompt(), 'currently disabled (allowWrites: false)')
+  parsed.allowWrites[write](true)
+  includes(prompt(), 'require per-call user approval (requireApproval: true)')
+  includes(prompt(), 'unavailable approval blocks the request')
+  parsed.requireApproval[write](false)
+  includes(prompt(), 'approval is DISABLED (requireApproval: false)')
+  includes(prompt(), 'without further confirmation')
+  includes(prompt(), 'publish unintended changes to the real repository')
+  assert.doesNotMatch(prompt(), /require per-call user approval/)
+  parsed.allowWrites[write](false)
+  includes(prompt(), 'currently disabled (allowWrites: false)')
+  assert.doesNotMatch(prompt(), /currently enabled|Write tools execute/)
+  parsed.requireApproval[write](true)
+  parsed.allowWrites[write](true)
+  includes(prompt(), 'require per-call user approval (requireApproval: true)')
+  assert.doesNotMatch(prompt(), /approval is DISABLED/)
+  for (const name of WRITE_TOOLS) {
+    const description = ctx.registered.find((tool) => tool.name === name).description
+    includes(description, 'when requireApproval: true')
+    includes(description, 'With requireApproval: false, writes execute without further confirmation')
+  }
+})
+
+await test('github_status exposes the current approval policy including the opt-out risk', async () => {
+  const parsed = internals.Config({})
+  const write = Symbol.for('cosmokit.volatile.write')
+  const harness = createHarness(parsed, { router: routerOf({ 'GET /rate_limit': () => jsonResponse({}) }) })
+  for (const [allowWrites, requireApproval] of [[false, true], [true, true], [true, false], [false, false]]) {
+    parsed.allowWrites[write](allowWrites)
+    parsed.requireApproval[write](requireApproval)
+    const { text, value } = await callTool(harness, 'github_status', {})
+    assert.equal(value.allowWrites, allowWrites)
+    assert.equal(value.requireApproval, requireApproval)
+    includes(text, `writes: ${allowWrites ? 'enabled' : 'disabled (read-only)'}`)
+    if (requireApproval) {
+      includes(text, 'approval: required per write')
+      assert.doesNotMatch(text, /approval is DISABLED/)
+    } else {
+      includes(text, 'approval is DISABLED (requireApproval: false)')
+      includes(text, 'without further confirmation')
+      includes(text, 'publish unintended changes to the real repository')
+    }
+  }
+  assert.ok(harness.calls.every((request) => request.method === 'GET'))
+})
+
 await test('a cancelled write approval fails closed with the outcome name', async () => {
   const harness = createHarness(
     { allowWrites: true, requireApproval: true },
@@ -1906,6 +2044,58 @@ await test('a token provider is read per request and resets the response cache o
   await client.json(`/repos/${REPO}`)
   assert.deepEqual(authorizations, ['Bearer token-one', 'Bearer token-two'], 'a changed token cleared the cache and re-authenticated')
   assert.equal(await client.getToken(), 'token-two')
+})
+
+await test('apply keeps credential-store reads and live write policy working together', async () => {
+  const originalFetch = globalThis.fetch
+  const savedEnv = { GITHUB_TOKEN: process.env.GITHUB_TOKEN, GH_TOKEN: process.env.GH_TOKEN }
+  const requests = []
+  const resolvedRefs = []
+  let storedToken = 'test-credential-one'
+  const ctx = fakeCtx({ services: { credentials: { async resolve(ref) {
+    resolvedRefs.push(ref)
+    return { value: storedToken }
+  } } } })
+  try {
+    delete process.env.GITHUB_TOKEN
+    delete process.env.GH_TOKEN
+    globalThis.fetch = async (_url, init) => {
+      requests.push(init)
+      return jsonResponse(REPO_FIXTURE)
+    }
+    const parsed = internals.Config({})
+    const write = Symbol.for('cosmokit.volatile.write')
+    apply(ctx, parsed)
+    const harness = { byName: new Map(ctx.registered.map((tool) => [tool.name, tool])) }
+    for (const [token, allowWrites, requireApproval] of [
+      ['test-credential-one', false, true],
+      ['test-credential-two', true, true],
+      ['', true, false],
+    ]) {
+      storedToken = token
+      parsed.allowWrites[write](allowWrites)
+      parsed.requireApproval[write](requireApproval)
+      const { value, text } = await callTool(harness, 'github_repo', { repo: REPO })
+      assert.ok(!JSON.stringify(value).includes('test-credential-'))
+      assert.ok(!text.includes('test-credential-'))
+      assert.equal(requests.at(-1).headers.Authorization, token ? `Bearer ${token}` : undefined)
+    }
+    assert.equal(requests.length, 3, 'credential changes invalidate the GET cache')
+    assert.ok(resolvedRefs.every((ref) => ref === 'GITHUB_TOKEN'))
+    assert.ok(requests.every((request) => request.method === 'GET'))
+    parsed.allowWrites[write](false)
+    await callToolFails(harness, 'github_create_issue', { repo: REPO, title: 'Denied' }, /writes are disabled/)
+    parsed.allowWrites[write](true)
+    parsed.requireApproval[write](true)
+    await callToolFails(harness, 'github_comment', { repo: REPO, number: 1, body: 'Denied' }, /no approval service/)
+    assert.equal(requests.length, 3, 'live policy changes block writes before fetch')
+  } finally {
+    globalThis.fetch = originalFetch
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
 })
 
 // ---------------------------------------------------------------------------

@@ -612,7 +612,10 @@ export function renderStatus(value, maxOutputChars) {
     `api: ${value.apiBaseUrl}`,
     value.user ? `user: ${link(`@${value.user.login}`, value.user.htmlUrl)}${value.user.name ? ` (${value.user.name})` : ''}` : '',
     value.scopes.length > 0 ? `token scopes: ${value.scopes.join(', ')}` : '',
-    `writes: ${value.allowWrites ? 'enabled' : 'disabled (read-only)'}${value.allowWrites && value.requireApproval ? ', approval required per write' : ''}`,
+    `writes: ${value.allowWrites ? 'enabled' : 'disabled (read-only)'}`,
+    value.requireApproval
+      ? 'approval: required per write (requireApproval: true)'
+      : 'WARNING: approval is DISABLED (requireApproval: false); when writes are enabled, the agent can publish unintended changes to the real repository without further confirmation.',
     value.defaultRepo ? `default repository: ${value.defaultRepo}` : '',
     `git origin detection: ${value.detectRepoFromGit ? 'enabled' : 'disabled'}`,
     value.rateLimit ? `rate limit: ${value.rateLimit.remaining}/${value.rateLimit.limit} remaining${value.rateLimit.resetAt ? `, resets at ${value.rateLimit.resetAt}` : ''}` : '',

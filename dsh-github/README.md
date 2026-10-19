@@ -33,7 +33,8 @@ Host settings service / credential store   ├─ config.js   token/env + live v
 The canonical tool value is compact structured JSON; `output.render` turns it into Markdown with
 an explicit *untrusted data* notice, so repository/issue/PR text cannot quietly become model
 instructions. Reads are free of side effects. Writes are disabled by default and, when enabled,
-pass through `ctx.approval` before any request is sent.
+pass through `ctx.approval` before any request is sent unless the user explicitly sets
+`requireApproval: false`.
 
 ## Tools
 
@@ -147,7 +148,7 @@ Override the row in the profile patch (`~/.dsh/profiles/<profile>/cordis.patch.y
 | `defaultRepo` | `''` | Repository used when a call omits `repo` |
 | `detectRepoFromGit` | `true` | Read the git `origin` remote of the Session directory |
 | `allowWrites` | `false` | Master switch for the three write tools |
-| `requireApproval` | `true` | Ask `ctx.approval` before each write; fail closed when no answerer |
+| `requireApproval` | `true` | Ask `ctx.approval` before each write; fail closed when no answerer. `false` removes per-write confirmation when writes are enabled |
 | `requestTimeoutMs` | `20000` | Per-request timeout |
 | `cacheTtlSeconds` | `30` | GET cache TTL; `0` disables caching |
 | `maxOutputChars` | `60000` | Per-result output budget |
@@ -164,7 +165,13 @@ in the profile patch and reload the plugin row.
    message before any HTTP request.
 2. **Per-write approval.** With `requireApproval: true`, writes call `ctx.approval.request()` with
    a bilingual reason naming the repository and issue/PR title. Only `allowed-once` proceeds;
-   `rejected`, `cancelled`, and `unavailable` all fail closed.
+   `rejected`, `cancelled`, and `unavailable` all fail closed. A missing or failing approval
+   service sends no write request: restore the service and retry, or keep writes disabled.
+   Explicitly setting `requireApproval: false` removes this protection: with `allowWrites: true`,
+   the Agent can publish issues, comments, and pull requests to the real repository without
+   further confirmation, including unintended content. This does not override `allowWrites: false`
+   or grant additional GitHub token permissions. The system prompt reads the current settings
+   each time it is generated; `github_status` and the Settings hint also expose the approval policy.
 3. **Fixed origin.** Tools pass only relative API paths; a caller cannot make the plugin send the
    token to an arbitrary host. `apiBaseUrl` is deployment configuration.
 4. **Untrusted content.** Read results that carry GitHub-authored text start with
@@ -199,15 +206,20 @@ If none resolves, the tool returns a guidance error instead of guessing.
 
 ## Verification
 
-- **Host offline harness**: `node tests/github-tools.test.mjs` — 82 dependency-free cases over an
+- **Host offline harness**: `node tests/github-tools.test.mjs` — 100 dependency-free cases over an
   in-process mocked GitHub fetch layer (no network, no token). Covers request construction,
   rendering, write gating/approval, error mapping, ETag caching, Accept-aware cache isolation,
   timeouts and cancellation, repo resolution, argument validation, the Config schema's volatile
-  projection, live settings references, and token-provider cache invalidation.
+  projection, live settings references and prompt policy, credential-store reads, and
+  token-provider cache invalidation. All three write tools are checked for default denial,
+  pending/allowed-once approval, rejection/cancellation, unavailable/failing approval, and
+  explicit opt-out; blocked operations assert zero HTTP requests.
 - **Client harness**: `node tests/github-settings-client.test.mjs` evaluates the
   `window.__ModuleLoader__` artifact in a vm sandbox and verifies the module id, React-only import,
   dictionaries, `configForms.get('github')` binding, namespace watch, and the `settings.section`
-  registration (id/order/label/inject face).
+  registration (id/order/label/inject face). It also exercises token save/clear handlers against
+  a mock credential store, checks that tokens stay out of settings writes and rendered results,
+  and verifies the bilingual approval warning.
 - **Live read checks** (post-install, anonymous):
   - `github_status` → anonymous, 60/hour, `api.github.com`, writes disabled;
   - `github_repo` on `deepseek-ai/DeepSeek-V3` → default branch, stars, forks, license, last push;

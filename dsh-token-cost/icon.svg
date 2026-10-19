@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Token cost meter">
+  <defs>
+    <linearGradient id="coin" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6c64b"/>
+      <stop offset="1" stop-color="#d99a17"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="26" fill="url(#coin)"/>
+  <circle cx="32" cy="32" r="21" fill="none" stroke="#8a5a00" stroke-opacity="0.35" stroke-width="2"/>
+  <path d="M23 20l9 11 9-11M32 31v14M24 34h16M24 40h16" fill="none" stroke="#5b3a00" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8 22a6 6 0 0 1 6-6M56 42a6 6 0 0 1-6 6" fill="none" stroke="#2f7a4f" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

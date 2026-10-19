@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sidebar Clock",
+    "description": "Shows the local time, the current DeepSeek peak/off-peak band, and countdowns to the next weekend and Chinese public holiday at the top of the sidebar."
+  }
+}

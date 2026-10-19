@@ -1,0 +1,7 @@
+# Sidebar clock bundle.
+#
+# The clock card, tariff band and countdowns are rendered by the Client module
+# (`client.js`); this Host row only puts the bundle in the profile inventory.
+- insert:
+    - id: sidebar-clock
+      name: '@local/dsh-sidebar-clock'

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Token Cost Meter",
+    "description": "Shows the live token cost of the current session, split into peak and off-peak spend with cache-hit, cache-write, and output breakdowns."
+  }
+}

@@ -1,0 +1,57 @@
+# Token cost plugin bundle.
+#
+# Rates and peak hours are fetched from the official DeepSeek pricing page and
+# frozen per conversation at its creation time: a rate change prices new
+# conversations under the new rules and never rewrites an existing one.
+#
+# The `rates` block below is only the fallback used when the catalog cannot be
+# fetched (or `pricingSource: false`). Values are peak rates in the catalog
+# currency per 1,000,000 tokens; off-peak applies `offPeakMultiplier`.
+- insert:
+    - id: token-cost
+      name: '@local/dsh-token-cost'
+      config:
+        # Official machine-readable price page. Set false to stay offline.
+        pricingSource: https://api-docs.deepseek.com/quick_start/pricing
+        refreshIntervalMs: 21600000
+        fetchTimeoutMs: 15000
+        # Chinese public-holiday calendar: {year} is replaced with the year.
+        # The default mirrors the State Council arrangement (days off, including
+        # adjusted days; makeup workdays are ignored). Set false to stay offline
+        # and rely on the manual `holidays` list below.
+        holidaysSource: https://timor.tech/api/holiday/year/{year}
+        holidayRefreshIntervalMs: 86400000
+        # Extra manual holiday dates (Beijing dates), unioned with the source.
+        holidays: []
+        holidayOffsetMinutes: 480
+        # Optional policy overrides; omitted means use the catalog's windows.
+        # peakWindows: [[60, 240], [360, 600]]
+        # weekdaysOnly: true
+        # Display currency. Empty = use the catalog currency (USD).
+        # Set e.g. CNY / ¥ / 7.2 to display a converted amount.
+        currency: ''
+        symbol: ''
+        exchangeRate: 1
+        offPeakEnabled: true
+        # "included": reasoning tokens are already inside outputTokens.
+        # "separate": charge reasoningTokens at the output rate as well.
+        reasoningBilling: included
+        rates:
+          deepseek-flash:
+            input: 0.3
+            cacheRead: 0.006
+            cacheWrite: 0.3
+            output: 1.2
+            offPeakMultiplier: 0.5
+          deepseek-v4-pro:
+            input: 1.32
+            cacheRead: 0.044
+            cacheWrite: 1.32
+            output: 3.96
+            offPeakMultiplier: 0.5
+          default:
+            input: 0.3
+            cacheRead: 0.006
+            cacheWrite: 0.3
+            output: 1.2
+            offPeakMultiplier: 0.5

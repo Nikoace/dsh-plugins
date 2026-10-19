@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub Integration",
+    "description": "Brings GitHub into the conversation and Settings: configure the token, default repository, and write policy; search repositories and code, read issues, pull requests, diffs, commits, and files, and (opt-in, approval-gated) create issues, comments, and pull requests."
+  }
+}

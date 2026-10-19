@@ -1,0 +1,22 @@
+# GitHub integration bundle: registers the model-facing `github_*` tools.
+#
+# Read-only by default. To enable `github_create_issue`, `github_comment`, and
+# `github_create_pull_request`, set `allowWrites: true` (keep
+# `requireApproval: true`). Prefer a `GITHUB_TOKEN` environment variable over a
+# literal `token` here; a token in this file is stored in the profile patch.
+- insert:
+    - id: github
+      name: '@local/dsh-github'
+      config:
+        token: ''
+        tokenEnv: GITHUB_TOKEN
+        apiBaseUrl: https://api.github.com
+        apiVersion: '2022-11-28'
+        defaultRepo: ''
+        detectRepoFromGit: true
+        allowWrites: false
+        requireApproval: true
+        requestTimeoutMs: 20000
+        cacheTtlSeconds: 30
+        maxOutputChars: 60000
+        toolTimeoutMs: 60000

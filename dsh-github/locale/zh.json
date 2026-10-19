@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub 集成",
+    "description": "在会话与设置中使用 GitHub：在设置里配置令牌、默认仓库与写入策略；搜索仓库与代码，阅读 Issue、Pull Request、diff、提交与文件，写入（新建 Issue、评论、创建 PR）默认关闭，开启后逐次审批。"
+  }
+}

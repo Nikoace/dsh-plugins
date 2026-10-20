@@ -27,6 +27,15 @@ publishable package.
   `calls` / `tokens` / the amount, and labelled in the dialog, so a gateway that is billed elsewhere
   can no longer be priced from the DeepSeek card (and can no longer be silently folded into a total).
 - `tests/fixtures/pricing-page-zh.html`: contract fixture for the zh-CN price table.
+- `dsh-token-cost`: **the pill's currency follows the interface language**. Both official price-page
+  copies are fetched and kept side by side (zh-CN = CNY, English = USD), and each currency's amount is
+  computed from its own published table — verified against the real logs, the two totals imply the
+  official 6.6667 ratio, so the dollar figure is published data rather than a conversion. A copy that
+  disagrees on the peak windows (or fails to fetch) contributes no table, and a currency the epoch
+  never published is reported as `unpricedByCurrency` instead of being billed at another currency's
+  rate. `currency` in the config pins one currency and overrides the language (`pinnedCurrency`).
+  New wire fields: `currencies`, `pinnedCurrency`, `unpricedByCurrency`, `amounts`, `bucketMicrosByCurrency`,
+  `models[].byCurrency`, `subtree.amounts`.
 - `dsh-token-cost`: **sub-agent totals**. The fold records the `subagent/catalog` child ids, the Host
   keeps each Session's own amount in a display-only cache, and the wire value gained
   `subtree = { micros, ownMicros, childrenMicros, childCount, unknownCount, calls }`. The pill shows

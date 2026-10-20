@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Token Cost Meter",
-    "description": "Shows the live token cost of the current session in CNY, pricing each request at the rate in force when it ran so a rate change only affects later requests, split into peak and off-peak spend with cache-hit, cache-write, and output breakdowns. Gateways that are billed elsewhere (such as magpie) are listed separately."
+    "description": "Shows the live token cost of the current session in CNY or USD following the interface language, each currency priced from its own official rate table (no FX conversion). Every request is priced at the rate in force when it ran, so a rate change only affects later requests. Splits peak and off-peak spend with cache-hit, cache-write, and output breakdowns, and reports a sub-agent total. Gateways that are billed elsewhere (such as magpie) are listed separately."
   }
 }

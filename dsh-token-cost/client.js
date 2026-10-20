@@ -30,6 +30,7 @@ window.__ModuleLoader__.load({
     const MEASURE_STYLE = { visibility: 'hidden', left: 0, top: 0 }
 
     const zh = {
+      'currency.code': 'CNY',
       'pill.aria': '本次会话 token 费用 {cost}，当前{band}时段',
       'pill.ariaSubagents': '本次会话及其 {count} 个子 agent 合计 {cost}，当前{band}时段',
       'band.peak': '高峰',
@@ -79,8 +80,8 @@ window.__ModuleLoader__.load({
       'pricing.updated': '读取于 {time}',
       'pricing.newSessions': '费率按请求发生时间取当时有效的价格；价格调整只影响调整之后的请求。',
       'pricing.timeline': '费率时间线：{count} 段',
-      'pricing.timelineRow': '{from} 起 · 未缓存 ¥{input}/M · 缓存命中 ¥{cacheRead}/M · 输出 ¥{output}/M',
-      'pricing.timelineRowOpen': '{from} 起（当前）· 未缓存 ¥{input}/M · 缓存命中 ¥{cacheRead}/M · 输出 ¥{output}/M',
+      'pricing.timelineRow': '{from} 起 · 未缓存 {symbol}{input}/M · 缓存命中 {symbol}{cacheRead}/M · 输出 {symbol}{output}/M',
+      'pricing.timelineRowOpen': '{from} 起（当前）· 未缓存 {symbol}{input}/M · 缓存命中 {symbol}{cacheRead}/M · 输出 {symbol}{output}/M',
       'pricing.excludedRoutes': '不计价：{providers}',
       'model.excluded': '{count} 次未计价',
       'model.epochs': '{count} 个费率时段',
@@ -108,6 +109,7 @@ window.__ModuleLoader__.load({
     }
 
     const en = {
+      'currency.code': 'USD',
       'pill.aria': 'This session costs {cost}; current band: {band}',
       'pill.ariaSubagents': 'This session plus its {count} sub-agent(s) costs {cost}; current band: {band}',
       'band.peak': 'Peak',
@@ -157,8 +159,8 @@ window.__ModuleLoader__.load({
       'pricing.updated': 'read {time}',
       'pricing.newSessions': 'Each request is priced by the rate in force when it ran; a price change only affects requests after it.',
       'pricing.timeline': 'Rate timeline: {count} segments',
-      'pricing.timelineRow': 'from {from} · uncached ¥{input}/M · cache read ¥{cacheRead}/M · output ¥{output}/M',
-      'pricing.timelineRowOpen': 'from {from} (current) · uncached ¥{input}/M · cache read ¥{cacheRead}/M · output ¥{output}/M',
+      'pricing.timelineRow': 'from {from} · uncached {symbol}{input}/M · cache read {symbol}{cacheRead}/M · output {symbol}{output}/M',
+      'pricing.timelineRowOpen': 'from {from} (current) · uncached {symbol}{input}/M · cache read {symbol}{cacheRead}/M · output {symbol}{output}/M',
       'pricing.excludedRoutes': 'Not priced: {providers}',
       'model.excluded': '{count} not priced',
       'model.epochs': '{count} rate segments',
@@ -798,6 +800,63 @@ window.__ModuleLoader__.load({
       return `${millions >= 100 ? Math.round(millions) : millions >= 10 ? millions.toFixed(1) : millions.toFixed(2)}M`
     }
 
+    /**
+     * The currency this render should show, and its symbol.
+     *
+     * The choice follows the interface language: a Chinese UI shows the CNY
+     * amount, an English UI the USD amount. Both come from the same published
+     * price page pair, so neither is a conversion of the other. When the Host
+     * could not fetch the other copy, the view only has one amount and that one
+     * is shown under its own symbol — never relabelled as the missing currency.
+     */
+    function displayCurrency(view, t) {
+      const available = Array.isArray(view?.currencies) && view.currencies.length > 0 ? view.currencies : [view?.currency]
+      // An explicit `currency` in the row config pins the display regardless of
+      // language; the Host advertises it as `pinnedCurrency`.
+      const pinned = view?.pinnedCurrency
+      if (typeof pinned === 'string' && available.includes(pinned)) return pinned
+      const wanted = t('currency.code')
+      if (typeof wanted === 'string' && available.includes(wanted)) return wanted
+      return typeof view?.currency === 'string' && view.currency.length > 0 ? view.currency : 'CNY'
+    }
+
+    /** Symbol for a currency code (the Host's own symbol is the fallback). */
+    function symbolOf(code, view) {
+      if (code === 'CNY') return '¥'
+      if (code === 'USD') return '$'
+      return typeof view?.symbol === 'string' && view.symbol.length > 0 ? view.symbol : ''
+    }
+
+    /**
+     * The amount to show for one money field, in the display currency.
+     *
+     * `view.amounts` carries one integer per currency the Session's epochs
+     * published; the per-field helpers fall back to the primary `micros` when
+     * that currency's table was never fetched.
+     */
+    function microsIn(view, currency, field) {
+      if (field === 'micros' && view?.amounts !== null && typeof view?.amounts === 'object') {
+        const value = view.amounts[currency]
+        if (typeof value === 'number' && Number.isFinite(value)) return value
+      }
+      return typeof view?.[field] === 'number' ? view[field] : 0
+    }
+
+    /**
+     * The per-bucket rows in the display currency.
+     *
+     * The Host sends one bucket set per published currency; a bucket set for a
+     * currency the table never had falls back to the primary one.
+     */
+    function bucketsIn(view, currency) {
+      const alternate = view?.bucketMicrosByCurrency
+      const primary = view?.bucketMicros ?? {}
+      if (currency !== view?.currency && alternate !== null && typeof alternate === 'object' && alternate[currency] !== null && typeof alternate[currency] === 'object') {
+        return alternate[currency]
+      }
+      return primary
+    }
+
     /** Adaptive currency text from integer micro-currency. */
     function formatMoney(micros, symbol) {
       const value = (typeof micros === 'number' && Number.isFinite(micros) ? micros : 0) / 1_000_000
@@ -901,32 +960,52 @@ window.__ModuleLoader__.load({
       const duration = formatDuration(switchMinutes, t)
       const switchAt = switchMinutes === null ? null : clockAt(now + switchMinutes * 60_000)
       const untilText = duration === null ? null : switchAt === null ? t('band.until', { duration }) : t('band.untilAt', { duration, time: switchAt })
-      const symbol = view.symbol
+      // The displayed currency follows the interface language, and every amount
+      // below is read from that currency's own published table.
+      const currency = displayCurrency(view, t)
+      const symbol = symbolOf(currency, view)
+      const money = (field) => formatMoney(microsIn(view, currency, field), symbol)
+      // The per-bucket rows follow the same currency as the totals.
+      const buckets = bucketsIn(view, currency)
       const modelRows = Array.isArray(view.models) ? view.models : []
       // A task that ran through sub-agents costs far more than this Session's
       // own requests, so the headline is the whole tree; the breakdown keeps the
       // own/children split visible.
       const subtree = view.subtree ?? null
-      const ownMicros = typeof subtree?.ownMicros === 'number' ? subtree.ownMicros : view.micros
-      const headlineMicros = typeof subtree?.micros === 'number' ? subtree.micros : view.micros
+      // The tree's own share in the display currency: `amounts[currency]` is the
+      // tree total, and the own part is this Session's own amount in that same
+      // currency, so the two rows stay additive.
+      const ownMicros = microsIn(view, currency, 'micros')
       const childCount = typeof subtree?.childCount === 'number' ? subtree.childCount : 0
       const unknownChildren = typeof subtree?.unknownCount === 'number' ? subtree.unknownCount : 0
+      const subtreeMoney = (field) => {
+        const alternate = subtree?.amounts
+        const total =
+          alternate !== null && typeof alternate === 'object' && typeof alternate[currency] === 'number'
+            ? alternate[currency]
+            : typeof subtree?.micros === 'number'
+              ? subtree.micros
+              : 0
+        if (field === 'micros') return formatMoney(total, symbol)
+        if (field === 'ownMicros') return formatMoney(ownMicros, symbol)
+        return formatMoney(Math.max(0, total - ownMicros), symbol)
+      }
       const subtreeText =
         subtree === null || childCount === 0
           ? null
           : unknownChildren > 0
             ? t('subtree.valueUnknown', {
-                cost: formatMoney(headlineMicros, symbol),
-                own: formatMoney(ownMicros, symbol),
+                cost: subtreeMoney('micros'),
+                own: subtreeMoney('ownMicros'),
                 count: childCount,
-                children: formatMoney(subtree.childrenMicros, symbol),
+                children: subtreeMoney('childrenMicros'),
                 unknown: unknownChildren,
               })
             : t('subtree.value', {
-                cost: formatMoney(headlineMicros, symbol),
-                own: formatMoney(ownMicros, symbol),
+                cost: subtreeMoney('micros'),
+                own: subtreeMoney('ownMicros'),
                 count: childCount,
-                children: formatMoney(subtree.childrenMicros, symbol),
+                children: subtreeMoney('childrenMicros'),
               })
       const localWindows = localWindowsText(pricing, now)
       const utcWindows = windowsText(pricing)
@@ -963,6 +1042,7 @@ window.__ModuleLoader__.load({
         const open = index === timeline.length - 1
         const params = {
           from: hintTimeText(epoch.effectiveFrom, t),
+          symbol,
           input: rate === null ? '?' : String(rate.input),
           cacheRead: rate === null ? '?' : String(rate.cacheRead),
           output: rate === null ? '?' : String(rate.output),
@@ -1035,7 +1115,7 @@ window.__ModuleLoader__.load({
               showHolidayWarning ? h('span', { className: 'dsh-tc-hintWarn', 'aria-hidden': true }) : null,
             ),
           ),
-          h('span', { className: 'dsh-tc-titleValue' }, formatMoney(headlineMicros, symbol)),
+          h('span', { className: 'dsh-tc-titleValue' }, subtree === null || childCount === 0 ? money('micros') : subtreeMoney('micros')),
         ),
         h('div', { className: 'dsh-tc-titleRule', 'aria-hidden': true }),
         hintOpen
@@ -1059,26 +1139,26 @@ window.__ModuleLoader__.load({
         h(
           'dl',
           { className: 'dsh-tc-details' },
-          h(Row, { label: t('total'), value: formatMoney(view.micros, symbol) }),
+          h(Row, { label: t('total'), value: money('micros') }),
           subtreeText === null ? null : h(Row, { label: t('total.withSubagents'), value: subtreeText }),
           h(Row, {
             label: t('peakCost'),
-            value: t('band.spend', { cost: formatMoney(view.peakMicros, symbol), tokens: formatTokens(tokenTotal(view.peak.tokens)) }),
+            value: t('band.spend', { cost: money('peakMicros'), tokens: formatTokens(tokenTotal(view.peak.tokens)) }),
           }),
           h(Row, {
             label: t('offPeakCost'),
-            value: t('band.spend', { cost: formatMoney(view.offPeakMicros, symbol), tokens: formatTokens(tokenTotal(view.offPeak.tokens)) }),
+            value: t('band.spend', { cost: money('offPeakMicros'), tokens: formatTokens(tokenTotal(view.offPeak.tokens)) }),
           }),
-          view.savedMicros > 0 ? h(Row, { label: t('saved'), value: formatMoney(view.savedMicros, symbol) }) : null,
+          view.savedMicros > 0 ? h(Row, { label: t('saved'), value: money('savedMicros') }) : null,
           h(Row, {
             label: t('calls'),
             value: `${t('callsValue', { count: view.calls })} · ${t('callsSplit', { peak: view.peak.calls, offPeak: view.offPeak.calls })}`,
           }),
           h('dt', { className: 'dsh-tc-section' }, t('section.tokens')),
-          h(TokenRow, { label: t('token.input'), tokens: view.tokens.input, micros: view.bucketMicros?.input ?? 0, symbol, t }),
-          h(TokenRow, { label: t('token.cacheRead'), tokens: view.tokens.cacheRead, micros: view.bucketMicros?.cacheRead ?? 0, symbol, t }),
-          h(TokenRow, { label: t('token.cacheWrite'), tokens: view.tokens.cacheWrite, micros: view.bucketMicros?.cacheWrite ?? 0, symbol, t }),
-          h(TokenRow, { label: t('token.output'), tokens: view.tokens.output, micros: view.bucketMicros?.output ?? 0, symbol, t }),
+          h(TokenRow, { label: t('token.input'), tokens: view.tokens.input, micros: buckets.input, symbol, t }),
+          h(TokenRow, { label: t('token.cacheRead'), tokens: view.tokens.cacheRead, micros: buckets.cacheRead, symbol, t }),
+          h(TokenRow, { label: t('token.cacheWrite'), tokens: view.tokens.cacheWrite, micros: buckets.cacheWrite, symbol, t }),
+          h(TokenRow, { label: t('token.output'), tokens: view.tokens.output, micros: buckets.output, symbol, t }),
           h('dt', { className: 'dsh-tc-section' }, t('section.band')),
           h(Row, { label: t('label.currentBand'), value: `${bandLabel}${untilText === null ? '' : ` · ${untilText}`}` }),
           localWindows.length > 0 ? h(Row, { label: t('label.peakWindows'), value: t('window.local', { windows: localWindows, zone: systemTimeZone() }) }) : null,
@@ -1087,16 +1167,22 @@ window.__ModuleLoader__.load({
           ...modelRows.map((entry) => {
             const excluded = entry.excludedCalls > 0
             const segments = Array.isArray(entry.epochs) ? entry.epochs.length : 0
+            // The model row is priced in its own currency; when it differs from
+            // the display one, take this currency's slice of that row.
+            const slice = currency === view.currency ? entry : entry.byCurrency?.[currency] ?? null
+            const modelMicros = slice === null ? entry.micros : slice.micros
+            const modelPeak = slice === null ? entry.peak.micros : slice.peakMicros
+            const modelOffPeak = slice === null ? entry.offPeak.micros : slice.offPeakMicros
             const meta = excluded
               ? t('model.excluded', { count: entry.excludedCalls })
-              : `${t('model.split', { peak: formatMoney(entry.peak.micros, symbol), offPeak: formatMoney(entry.offPeak.micros, symbol) })}${
+              : `${t('model.split', { peak: formatMoney(modelPeak, symbol), offPeak: formatMoney(modelOffPeak, symbol) })}${
                   segments > 1 ? ` · ${t('model.epochs', { count: segments })}` : ''
                 }`
             return h(
               'div',
               { className: excluded ? 'dsh-tc-model dsh-tc-modelExcluded' : 'dsh-tc-model', key: `${entry.provider}/${entry.model}` },
               h('span', { className: 'dsh-tc-modelName', title: `${entry.provider}/${entry.model}` }, entry.model),
-              h('span', null, t('model.value', { cost: excluded ? '—' : formatMoney(entry.micros, symbol), count: entry.calls })),
+              h('span', null, t('model.value', { cost: excluded ? '—' : formatMoney(modelMicros, symbol), count: entry.calls })),
               h('span', { className: 'dsh-tc-modelMeta' }, meta),
             )
           }),
@@ -1179,10 +1265,19 @@ window.__ModuleLoader__.load({
       const bandLabel = t(band === 'offPeak' ? 'band.offPeak' : 'band.peak')
       // The pill answers "what did this task cost", so it shows the whole tree
       // (own requests plus every delegated Session). The dialog keeps the split.
+      // Its currency follows the interface language, like every other amount.
+      const pillCurrency = displayCurrency(view, t)
+      const pillSymbol = symbolOf(pillCurrency, view)
       const subtree = view.subtree ?? null
-      const pillMicros = typeof subtree?.micros === 'number' ? subtree.micros : view.micros
+      const subtreeAmounts = subtree?.amounts
+      const pillMicros =
+        pillCurrency !== view.currency && subtreeAmounts !== null && typeof subtreeAmounts === 'object' && typeof subtreeAmounts[pillCurrency] === 'number'
+          ? subtreeAmounts[pillCurrency]
+          : typeof subtree?.micros === 'number'
+            ? subtree.micros
+            : microsIn(view, pillCurrency, 'micros')
       const childCount = typeof subtree?.childCount === 'number' ? subtree.childCount : 0
-      const cost = formatMoney(pillMicros, view.symbol)
+      const cost = formatMoney(pillMicros, pillSymbol)
       // A subtle amber dot makes a stale/degraded data source discoverable
       // without opening the dialog or reading logs.
       const warning = dataWarningOf(view.status ?? null)

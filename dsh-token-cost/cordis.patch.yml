@@ -13,10 +13,10 @@
     - id: token-cost
       name: '@local/dsh-token-cost'
       config:
-        # Official machine-readable price page, denominated in CNY. Point this at
-        # https://api-docs.deepseek.com/quick_start/pricing for the USD copy;
-        # the parser reads either and records which one it used. Set false to
-        # stay offline.
+        # Official machine-readable price page. The plugin also fetches the other
+        # language copy of this same page, so amounts can be shown in either
+        # currency at that currency's own published price (no conversion).
+        # Set false to stay offline.
         pricingSource: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
         refreshIntervalMs: 21600000
         fetchTimeoutMs: 15000
@@ -32,12 +32,13 @@
         # Optional policy overrides; omitted means use the catalog's windows.
         # peakWindows: [[60, 240], [360, 600]]
         # weekdaysOnly: true
-        # Display currency. Empty = use the catalog currency (CNY from the zh-CN
-        # page, USD from the English one). `exchangeRate` multiplies the card's
-        # own rates, so leave it at 1 unless you deliberately want converted
-        # amounts.
+        # Display currency. Empty = follow the interface language: the Chinese UI
+        # shows CNY, the English UI shows USD, each from its own published table.
+        # Set CNY or USD to pin one regardless of language.
         currency: ''
         symbol: ''
+        # Multiplies the card's own rates (1 = no conversion). Leave at 1 to keep
+        # the published prices exact in both currencies.
         exchangeRate: 1
         offPeakEnabled: true
         # "included": reasoning tokens are already inside outputTokens.

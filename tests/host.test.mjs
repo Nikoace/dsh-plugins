@@ -5,6 +5,7 @@ import { apply, internals } from '../dsh-token-cost/index.js'
 
 const {
   parsePricingPage,
+  mergeCurrencyCards,
   parseHolidayPayload,
   resolveSettings,
   createPricingCatalog,
@@ -350,6 +351,58 @@ assert.equal(scaledPrice.micros, bucketSum(scaledPrice.buckets))
   assert.equal(estimatedView.micros, 2_000_000, 'default card prices the estimated call')
 }
 
+// --- dual-currency card: both published copies, one amount each -----------
+{
+  const zh = parsePricingPage(zhFixture)
+  const en = parsePricingPage(fixture)
+  assert.equal(zh.currency, 'CNY')
+  assert.equal(en.currency, 'USD')
+  const merged = mergeCurrencyCards(zh, en)
+  assert.deepEqual(Object.keys(merged.ratesByCurrency).sort(), ['CNY', 'USD'], 'both published tables travel together')
+  assert.equal(merged.ratesByCurrency.CNY['deepseek-flash'].input, 2)
+  assert.equal(merged.ratesByCurrency.USD['deepseek-flash'].input, 0.3, 'the USD table is the English page, not a conversion')
+  assert.equal(merged.currency, 'CNY', 'the primary copy decides the default display currency')
+
+  // A copy that disagrees about the windows is not trusted as the same tariff.
+  const shifted = { ...en, peakWindows: [[120, 300], [360, 600]] }
+  assert.deepEqual(Object.keys(mergeCurrencyCards(zh, shifted).ratesByCurrency), ['CNY'], 'a copy with different windows does not contribute a table')
+
+  // Same tokens, two officially published amounts: 1M cache-miss + 1M output.
+  const settings = resolveSettings({ pricingSource: false })
+  const catalog = createPricingCatalog(settings)
+  catalog.ingest({ ...merged, source: 'official', fetchedAt: 5_000 }, 5_000)
+  const epoch = catalog.epochsFor(0).at(-1)
+  const entry = {
+    provider: 'deepseek-account',
+    model: 'deepseek-flash',
+    calls: 1,
+    tokens: { input: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 1_000_000, reasoning: 0 },
+    peak: { calls: 1, tokens: { input: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 1_000_000, reasoning: 0 } },
+    offPeak: { calls: 0, tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0 } },
+  }
+  assert.equal(priceModel(entry, epoch, 'CNY').micros, 10_000_000, 'CNY 2 + 8 = ¥10.00')
+  assert.equal(priceModel(entry, epoch, 'USD').micros, 1_500_000, 'USD 0.3 + 1.2 = $1.50')
+  assert.equal(priceModel(entry, epoch, null).micros, 10_000_000, 'no currency falls back to the epoch currency')
+
+  // The wire value exposes both, keyed by currency.
+  const def = unit({ pricingSource: false })
+  let state = syncEpochs(def.init({ createdAt: 0 }), catalog.epochsFor(0))
+  for (const event of [header(0), stepStart(NOW), assistant({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, { seq: 2 })]) state = def.apply(state, event)
+  const view = def.wire.view(state)
+  assert.deepEqual([...view.currencies].sort(), ['CNY', 'USD'])
+  assert.equal(view.amounts.CNY, 10_000_000)
+  assert.equal(view.amounts.USD, 1_500_000, 'the USD amount comes from the USD table')
+  assert.equal(view.bucketMicrosByCurrency.USD.output, 1_200_000)
+  assert.equal(view.models[0].byCurrency.USD.micros, 1_500_000)
+  assert.equal(view.subtree.amounts.USD, 1_500_000)
+
+  // A timeline whose epochs have no USD table must not invent one.
+  const cnyOnly = makePricingSnapshot(settings.fallbackCard, settings, 0)
+  const configOnly = viewOf(initialState([cnyOnly], null), null, undefined, 'USD')
+  assert.equal(configOnly.currency, 'CNY', 'a missing table falls back instead of relabelling CNY as USD')
+  assert.deepEqual(configOnly.currencies, ['CNY'], 'the missing currency is reported as unavailable')
+}
+
 // --- subtree total: a parent's pill includes its sub-agents ---------------
 {
   const def = unit({ pricingSource: false })
@@ -377,13 +430,14 @@ assert.equal(scaledPrice.micros, bucketSum(scaledPrice.buckets))
   assert.equal(bare.subtree.unknownCount, 2, 'two children with no cached amount are reported as unknown')
   assert.equal(bare.subtree.micros, 2_000_000, 'an unknown child is not silently counted as zero-cost')
 
-  // A Host cache with the children's amounts makes the subtree total real.
+  // A Host cache with the children's amounts makes the subtree total real. Each
+  // entry carries one amount per published currency.
   const cache = new Map([
-    [childA, { own: 3_000_000, calls: 2, children: [] }],
-    [childB, { own: 4_000_000, calls: 3, children: [grandchild] }],
-    [grandchild, { own: 1_000_000, calls: 1, children: [] }],
+    [childA, { own: { CNY: 3_000_000 }, calls: 2, children: [] }],
+    [childB, { own: { CNY: 4_000_000 }, calls: 3, children: [grandchild] }],
+    [grandchild, { own: { CNY: 1_000_000 }, calls: 1, children: [] }],
   ])
-  const withTree = viewOf(state, null, (id) => cache.get(id))
+  const withTree = viewOf(state, null, (id) => cache.get(id), 'CNY')
   assert.equal(withTree.subtree.ownMicros, 2_000_000)
   assert.equal(withTree.subtree.childrenMicros, 8_000_000, 'children plus grandchildren')
   assert.equal(withTree.subtree.micros, 10_000_000, 'own + the whole delegated tree')
@@ -392,12 +446,26 @@ assert.equal(scaledPrice.micros, bucketSum(scaledPrice.buckets))
   assert.equal(withTree.subtree.calls, 7, 'tool calls across the tree are additive')
   assert.equal(withTree.micros, 2_000_000, 'the plain own total is unchanged')
 
+  // Summing USD must never pick up the CNY amounts: those children are reported
+  // as unknown for that currency instead of silently contributing zero.
+  {
+    const dualSettings = resolveSettings({ pricingSource: false })
+    const dualCatalog = createPricingCatalog(dualSettings)
+    dualCatalog.ingest({ ...mergeCurrencyCards(parsePricingPage(zhFixture), parsePricingPage(fixture)), source: 'official', fetchedAt: 5_000 }, 5_000)
+    const dualState = fold(def, events, 0)
+    const usdState = syncEpochs(dualState, dualCatalog.epochsFor(0))
+    const usd = viewOf(usdState, null, (id) => cache.get(id), 'USD')
+    assert.equal(usd.currency, 'USD', 'the dual-currency timeline can be shown in USD')
+    assert.equal(usd.subtree.childrenMicros, 0, 'a currency with no cached child amounts contributes no money')
+    assert.equal(usd.subtree.unknownCount, 3, 'and the missing currency is disclosed, not hidden')
+  }
+
   // A cycle cannot loop forever.
   const cyclic = new Map([
-    [childA, { own: 1_000_000, calls: 1, children: [childB] }],
-    [childB, { own: 1_000_000, calls: 1, children: [childA] }],
+    [childA, { own: { CNY: 1_000_000 }, calls: 1, children: [childB] }],
+    [childB, { own: { CNY: 1_000_000 }, calls: 1, children: [childA] }],
   ])
-  assert.equal(viewOf(state, null, (id) => cyclic.get(id)).subtree.micros, 4_000_000, 'a cyclic catalog is visited once per Session')
+  assert.equal(viewOf(state, null, (id) => cyclic.get(id), 'CNY').subtree.micros, 4_000_000, 'a cyclic catalog is visited once per Session')
 }
 
 // --- the Host cache records each Session's own amount ---------------------
@@ -511,12 +579,14 @@ assert.equal(scaledPrice.micros, bucketSum(scaledPrice.buckets))
   const t1 = t0 + 30 * 60_000 // still inside the same peak window
   const before = catalog.snapshotFor(t0)
   assert.equal(before.version, 'config')
+  const changedRates = { 'deepseek-flash': { input: 4, cacheRead: 0.08, cacheWrite: 4, output: 16, offPeakMultiplier: 0.5 }, default: { input: 4, cacheRead: 0.08, cacheWrite: 4, output: 16, offPeakMultiplier: 0.5 } }
   const official = {
     ...settings.fallbackCard,
     source: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing',
     currency: 'CNY',
     symbol: '¥',
-    rates: { 'deepseek-flash': { input: 4, cacheRead: 0.08, cacheWrite: 4, output: 16, offPeakMultiplier: 0.5 }, default: { input: 4, cacheRead: 0.08, cacheWrite: 4, output: 16, offPeakMultiplier: 0.5 } },
+    rates: changedRates,
+    ratesByCurrency: { CNY: changedRates },
   }
   assert.equal(catalog.ingest(official, t1), true, 'a changed card becomes a new epoch')
   assert.equal(catalog.ingest(official, t1 + 1000), false, 'an unchanged card is not a new epoch')

@@ -1,9 +1,9 @@
 {
   "name": "@local/dsh-token-cost",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
-  "description": "Real-time token cost in CNY from the official DeepSeek rate card, priced per request across a rate timeline, peak/off-peak and cache-bucket aware.",
+  "description": "Real-time token cost from the official DeepSeek rate card, in CNY or USD following the interface language, priced per request across a rate timeline, peak/off-peak and cache-bucket aware.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

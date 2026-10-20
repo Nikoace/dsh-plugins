@@ -3,9 +3,12 @@
 A DSH Web UI plugin that prices the **current Session's** model usage in real time from the
 **official DeepSeek price page**, separating the parts that change what you actually pay:
 
-- **Currency** — the zh-CN page is the default source, so amounts are in **CNY (¥)**, the currency
-  the account is billed in. Point `pricingSource` at the English page for USD; the parser reads
-  either copy and records which one it used (`pageVariant`).
+- **Currency follows the interface language** — both official copies of the price page are fetched and
+  kept side by side: the zh-CN page is denominated in **CNY (¥)**, the English page in **USD ($)**. A
+  Chinese UI shows the yuan amount, an English UI the dollar amount, and **each is computed from its
+  own published price** — the dollar figure is not a conversion of the yuan one (the two tables imply
+  the same 6.6667 ratio, which is what makes them official rather than derived). If one copy cannot be
+  fetched, that currency is absent and the remaining one keeps its own symbol; nothing is relabelled.
 - **峰 / 谷 (peak / off-peak)** — the published peak windows, given on the zh-CN page in Beijing
   time (09:00–12:00 / 14:00–18:00) and normalized to UTC 01:00–04:00 / 06:00–10:00, Monday–Friday,
   Chinese public holidays excluded, applied with the per-model off-peak multiplier.
@@ -31,12 +34,14 @@ A DSH Web UI plugin that prices the **current Session's** model usage in real ti
 ## Where the numbers come from
 
 ```
-https://api-docs.deepseek.com/zh-cn/quick_start/pricing  (official, fetched on load + every 6h)
+https://api-docs.deepseek.com/zh-cn/quick_start/pricing  (CNY copy, fetched on load + every 6h)
+https://api-docs.deepseek.com/quick_start/pricing        (USD copy, fetched with it)
         │  parse model rows, cache-hit/miss/output peak prices, "空闲时段是高峰的一半",
         │  Beijing-time windows converted to UTC, "周一至周五"
         ▼
 effective-dated catalog (in memory)  ──►  every Session carries the epoch timeline
-        │                                      │  (each epoch closed by the next one)
+        │                                      │  (each epoch closed by the next one,
+        │                                      │   each holding one rate table per currency)
         │                                      ▼
         │                              tokenCost projection state
         │                              (billed facts per epoch + the timeline)
@@ -234,13 +239,13 @@ The bundle patch writes the defaults. A row with the same id in the profile's ow
 - id: token-cost
   name: '@local/dsh-token-cost'
   config:
-    # zh-CN copy (CNY). Use .../quick_start/pricing for the USD copy. false = offline.
+    # zh-CN copy; the plugin also fetches the English copy of the same page. false = offline.
     pricingSource: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
     refreshIntervalMs: 21600000
     fetchTimeoutMs: 15000
-    currency: ''          # empty = the catalog currency (CNY, USD from the English copy)
+    currency: ''          # empty = follow the UI language (zh → CNY, en → USD); or pin CNY/USD
     symbol: ''            # empty = ¥ for CNY, $ for USD
-    exchangeRate: 1       # multiplies the card's own rates; 1 = no conversion
+    exchangeRate: 1       # multiplies the card's own rates; keep 1 for published prices
     offPeakEnabled: true
     reasoningBilling: included   # or separate
     holidaysSource: https://timor.tech/api/holiday/year/{year}  # false = offline

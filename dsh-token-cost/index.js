@@ -41,17 +41,24 @@ import {
 } from './tariff.js'
 
 /**
- * Published machine-readable rate source.
+ * Published machine-readable rate sources.
  *
- * The zh-CN page is the default because it is denominated in **CNY** — the
- * currency the account is actually billed in — and states the peak windows in
- * Beijing time. The English page carries the same rates in USD and states the
- * windows in UTC; a config may point at it instead, and the parser records
- * which copy it read (`pageVariant`) so a rate card is never silently priced in
- * the wrong currency.
+ * The zh-CN page is denominated in **CNY** and states the peak windows in
+ * Beijing time; the English page carries the same rates in **USD** with the
+ * windows in UTC. Both are fetched and kept side by side, so the display can
+ * follow the interface language without inventing an exchange rate: each amount
+ * is computed from that currency's own published price. A page is never priced
+ * in the other copy's currency — the parser records which copy it read
+ * (`pageVariant`) and which currency the numbers are in.
  */
 const OFFICIAL_PRICING_URL = 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing'
 const OFFICIAL_PRICING_URL_EN = 'https://api-docs.deepseek.com/quick_start/pricing'
+
+/** Currency each published copy is denominated in. */
+const CURRENCY_OF_VARIANT = { zh: 'CNY', en: 'USD' }
+
+/** Display symbol per currency. */
+const SYMBOL_OF_CURRENCY = { CNY: '¥', USD: '$' }
 
 /** Official peak windows in UTC minutes: 01:00–04:00 and 06:00–10:00. */
 const DEFAULT_PEAK_WINDOWS = CANONICAL_PEAK_WINDOWS
@@ -60,16 +67,26 @@ const DEFAULT_PEAK_WINDOWS = CANONICAL_PEAK_WINDOWS
 const DEFAULT_HOLIDAY_OFFSET_MINUTES = 480
 
 /**
- * Official peak rates in CNY per 1,000,000 tokens, mirrored from the zh-CN page
- * (the page lists the off-peak half separately; the card stores peak values plus
- * the multiplier). Used only when the catalog cannot be fetched, and as the
- * first epoch of the price timeline when a Session has no earlier card.
+ * Official peak rates per 1,000,000 tokens, mirrored from both published copies
+ * (the page lists the off-peak half separately; a card stores peak values plus
+ * the multiplier). Used only when a copy cannot be fetched, and as the first
+ * epoch of the price timeline when a Session has no earlier card.
  */
-const DEFAULT_RATE_CARD = {
-  'deepseek-flash': { input: 2, cacheRead: 0.04, cacheWrite: 2, output: 8, offPeakMultiplier: 0.5 },
-  'deepseek-v4-pro': { input: 9, cacheRead: 0.3, cacheWrite: 9, output: 27, offPeakMultiplier: 0.5 },
-  default: { input: 2, cacheRead: 0.04, cacheWrite: 2, output: 8, offPeakMultiplier: 0.5 },
+const DEFAULT_RATE_CARDS = {
+  CNY: {
+    'deepseek-flash': { input: 2, cacheRead: 0.04, cacheWrite: 2, output: 8, offPeakMultiplier: 0.5 },
+    'deepseek-v4-pro': { input: 9, cacheRead: 0.3, cacheWrite: 9, output: 27, offPeakMultiplier: 0.5 },
+    default: { input: 2, cacheRead: 0.04, cacheWrite: 2, output: 8, offPeakMultiplier: 0.5 },
+  },
+  USD: {
+    'deepseek-flash': { input: 0.3, cacheRead: 0.006, cacheWrite: 0.3, output: 1.2, offPeakMultiplier: 0.5 },
+    'deepseek-v4-pro': { input: 1.32, cacheRead: 0.044, cacheWrite: 1.32, output: 3.96, offPeakMultiplier: 0.5 },
+    default: { input: 0.3, cacheRead: 0.006, cacheWrite: 0.3, output: 1.2, offPeakMultiplier: 0.5 },
+  },
 }
+
+/** The primary card: the currency a Session displays by default. */
+const DEFAULT_RATE_CARD = DEFAULT_RATE_CARDS.CNY
 
 /**
  * Copy variants of the pricing page.
@@ -388,6 +405,42 @@ function parsePricingPage(content) {
   return null
 }
 
+/**
+ * Merge the two published copies into one dual-currency card.
+ *
+ * Each copy contributes the same model rows priced in its own currency, so the
+ * result carries both instead of converting one into the other. The peak windows
+ * are normalized to UTC by each parser, so the two copies must agree on them —
+ * a disagreement means one of them was misread, and that copy is dropped rather
+ * than silently overriding the other.
+ *
+ * @param {object | null} primary - card from the primary source.
+ * @param {object | null} secondary - card from the other copy.
+ * @returns {object | null} a card with `rates` (primary currency) plus `ratesByCurrency`.
+ */
+function mergeCurrencyCards(primary, secondary) {
+  if (primary === null && secondary === null) return null
+  const first = primary ?? secondary
+  const second = secondary ?? primary
+  const ratesByCurrency = { [String(first.currency)]: first.rates }
+  // Only trust the second copy when it describes the same tariff: same model
+  // columns and the same normalized peak windows.
+  const compatible =
+    first !== second &&
+    second !== null &&
+    first.currency !== second.currency &&
+    Array.isArray(second.models) &&
+    JSON.stringify(first.models) === JSON.stringify(second.models) &&
+    JSON.stringify(first.peakWindows) === JSON.stringify(second.peakWindows)
+  if (compatible) ratesByCurrency[String(second.currency)] = second.rates
+  return {
+    ...first,
+    rates: first.rates,
+    ratesByCurrency,
+    pageVariants: [...new Set([first, ...(compatible ? [second] : [])].map((card) => card.pageVariant).filter((value) => typeof value === 'string'))],
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -636,6 +689,9 @@ function resolveSettings(config) {
     weekdaysOnlyOverride: weekdaysOnly,
     fallbackCard: {
       rates,
+      // The configured card is one currency; the fetched catalog adds the other
+      // copy's table so a display can follow the interface language.
+      ratesByCurrency: { [currency || 'CNY']: rates },
       peakWindows: fallbackWindows ?? DEFAULT_PEAK_WINDOWS.map((window) => [...window]),
       weekdaysOnly: weekdaysOnly ?? true,
       currency: currency || 'CNY',
@@ -707,6 +763,19 @@ function makePricingSnapshot(card, settings, createdAt) {
     },
     holidayOffsetMinutes: settings.holidayOffsetMinutes,
     rates: card.rates,
+    /**
+     * Every published currency's table for this epoch: `{ CNY: {...}, USD: {...} }`.
+     * A display picks the table of the currency it shows, so both amounts come
+     * from published prices and neither is a conversion of the other.
+     */
+    ratesByCurrency: (() => {
+      const tables = card.ratesByCurrency !== null && typeof card.ratesByCurrency === 'object' ? card.ratesByCurrency : { [currency]: card.rates }
+      // A configured `currency` override adds one table only when the catalog has
+      // no table of its own; the catalog's own tables always win.
+      const merged = { ...tables }
+      if (merged[currency] === undefined) merged[currency] = card.rates
+      return merged
+    })(),
   }
 }
 
@@ -737,14 +806,26 @@ function resolvePricingAt(versions, timeMs) {
  * @returns {string} fingerprint.
  */
 function cardFingerprint(card) {
-  const rates = Object.keys(card.rates)
-    .sort()
-    .map((key) => {
-      const rate = card.rates[key]
-      if (rate === null || rate === undefined) return `${key}:null`
-      return `${key}:${rate.input},${rate.cacheRead},${rate.cacheWrite},${rate.output},${rate.offPeakMultiplier}`
-    })
-    .join('|')
+  const tableOf = (table) =>
+    Object.keys(table)
+      .sort()
+      .map((key) => {
+        const rate = table[key]
+        if (rate === null || rate === undefined) return `${key}:null`
+        return `${key}:${rate.input},${rate.cacheRead},${rate.cacheWrite},${rate.output},${rate.offPeakMultiplier}`
+      })
+      .join('|')
+  // Every currency table is part of the priced identity: a card that only gains
+  // the other copy's table changes what the display can show, so it must become
+  // a new epoch instead of being folded into "metadata only".
+  const byCurrency = card.ratesByCurrency !== null && typeof card.ratesByCurrency === 'object' ? card.ratesByCurrency : null
+  const rates =
+    byCurrency === null
+      ? tableOf(card.rates)
+      : Object.keys(byCurrency)
+          .sort()
+          .map((code) => `${code}=${tableOf(byCurrency[code] ?? {})}`)
+          .join('~')
   const windows = (card.peakWindows ?? []).map((window) => window.join('-')).join(',')
   const holidays = (card.holidays ?? []).slice().sort().join(',')
   return `${rates}|${windows}|${card.weekdaysOnly}|${holidays}`
@@ -782,6 +863,7 @@ function createPricingCatalog(settings) {
       // the version, so a snapshot describes its own card accurately.
       if (typeof card.parserVersion === 'number') latest.parserVersion = card.parserVersion
       if (typeof card.pageVariant === 'string') latest.pageVariant = card.pageVariant
+      if (Array.isArray(card.pageVariants)) latest.pageVariants = [...card.pageVariants]
       if (typeof card.holidaysSource === 'string') latest.holidaysSource = card.holidaysSource
       if (card.holidayProvenance !== null && typeof card.holidayProvenance === 'object') latest.holidayProvenance = card.holidayProvenance
       return false
@@ -1359,8 +1441,14 @@ function foldEvent(state, event, epochs) {
  * @param {object} pricing - the rate epoch they were billed under.
  * @returns {object} priced entry.
  */
-function priceModel(entry, pricing) {
-  const match = findRate(pricing.rates, entry.provider, entry.model)
+function priceModel(entry, pricing, currency = null) {
+  // Each published copy prices the same tokens in its own currency, so the
+  // display currency selects a rate table rather than converting one amount.
+  const table =
+    currency !== null && pricing.ratesByCurrency !== null && typeof pricing.ratesByCurrency === 'object' && pricing.ratesByCurrency[currency] !== undefined
+      ? pricing.ratesByCurrency[currency]
+      : pricing.rates
+  const match = findRate(table, entry.provider, entry.model)
   const base = {
     provider: entry.provider,
     model: entry.model,
@@ -1435,10 +1523,11 @@ function priceModel(entry, pricing) {
  * caller can report the difference instead of silently under-reporting.
  *
  * @param {object} state - fold state (its `children` are the direct children).
- * @param {(id: string) => {own: number, calls: number, children: string[]} | undefined} lookup - the Host cache reader.
+ * @param {(id: string) => {own: Record<string, number>, calls: number, children: string[]} | undefined} lookup - the Host cache reader.
+ * @param {string} currency - which per-currency amount to add.
  * @returns {{ total: number, own: number, children: number, childCount: number, unknown: number, calls: number }} subtree money.
  */
-function subtreeOf(state, lookup) {
+function subtreeOf(state, lookup, currency = null) {
   const own = 0
   const direct = Array.isArray(state.children) ? state.children : []
   const seen = new Set()
@@ -1457,7 +1546,19 @@ function subtreeOf(state, lookup) {
       continue
     }
     childCount += 1
-    descendants += Number.isFinite(entry.own) ? entry.own : 0
+    // A cached entry carries one amount per published currency. A child that has
+    // no amount in the displayed currency is *unknown* for this currency, not a
+    // free child: counting it as 0 would understate a USD total that the cache
+    // only knows in CNY.
+    const byCurrency = entry.own !== null && typeof entry.own === 'object' ? entry.own : {}
+    const amount = currency !== null ? byCurrency[currency] : undefined
+    if (!Number.isFinite(amount)) {
+      unknown += 1
+      // Still walk its descendants: a grandchild may have the currency.
+      for (const grandchild of Array.isArray(entry.children) ? entry.children : []) stack.push({ id: grandchild })
+      continue
+    }
+    descendants += amount
     calls += Number.isFinite(entry.calls) ? entry.calls : 0
     for (const grandchild of Array.isArray(entry.children) ? entry.children : []) stack.push({ id: grandchild })
   }
@@ -1485,19 +1586,42 @@ function subtreeOf(state, lookup) {
  *   Sessions' own amounts, used for the subtree total.
  * @returns {object} the `tokenCost` wire value.
  */
-function viewOf(state, status = null, lookup = undefined) {
+function viewOf(state, status = null, lookup = undefined, currency = null, pinnedCurrency = null) {
   const epochs = Array.isArray(state.epochs) && state.epochs.length > 0 ? state.epochs : [state.pricing]
   const current = state.pricing ?? epochs[epochs.length - 1]
+  // The currency this view is priced in: the requested one when the *current*
+  // epoch has a published table for it, otherwise the epoch's own currency.
+  // Reporting the fallback (rather than pricing CNY numbers under a `$` sign)
+  // keeps a missing table visible instead of silently mislabeling the amount.
+  const available = current.ratesByCurrency !== null && typeof current.ratesByCurrency === 'object' ? Object.keys(current.ratesByCurrency) : [current.currency]
+  const shown = typeof currency === 'string' && currency.length > 0 && available.includes(currency) ? currency : current.currency
+  const symbol = SYMBOL_OF_CURRENCY[shown] ?? current.symbol
+  /** Whether one epoch can be priced in `shown` at all. */
+  const epochHasCurrency = (epoch) => {
+    const tables = epoch.ratesByCurrency
+    if (tables === null || tables === undefined) return epoch.currency === shown
+    return tables[shown] !== undefined
+  }
+  let unpricedByCurrency = 0
 
   const priced = Object.values(state.models).map((entry) => {
     // One model row can span epochs; price each slice under its own epoch and
-    // then add them, which is exactly what the provider would have charged.
+    // then add them, which is exactly what the provider would have charged. An
+    // epoch that never published this currency is counted as unpriced rather
+    // than billed at another currency's rate.
     const slices = Object.entries(entry.epochs ?? {}).map(([epochKey, epochEntry]) => {
       const epoch = epochs.find((candidate) => String(candidate.effectiveFrom) === epochKey) ?? current
-      return { epoch, entry: epochEntry, priced: priceModel(epochEntry, epoch) }
+      if (!epochHasCurrency(epoch)) {
+        unpricedByCurrency += epochEntry.calls
+        return { epoch, entry: epochEntry, priced: null }
+      }
+      return { epoch, entry: epochEntry, priced: priceModel(epochEntry, epoch, shown) }
     })
-    if (slices.length === 0) return { ...priceModel(entry, current), epochs: [] }
-    const pricedParts = slices.map((slice) => slice.priced)
+    if (slices.length === 0) {
+      if (!epochHasCurrency(current)) return { ...priceModel(entry, current, shown), epochs: [], unpriced: true, micros: 0, bucketMicros: zeroTokens() }
+      return { ...priceModel(entry, current, shown), epochs: [] }
+    }
+    const pricedParts = slices.map((slice) => slice.priced).filter((part) => part !== null)
     const total = {
       provider: entry.provider,
       model: entry.model,
@@ -1544,15 +1668,17 @@ function viewOf(state, status = null, lookup = undefined) {
         currency: slice.epoch.currency,
         symbol: slice.epoch.symbol,
         rateBasis: (() => {
-          const match = findRate(slice.epoch.rates, entry.provider, entry.model)
+          if (slice.priced === null) return 'unpriced'
+          const table = slice.epoch.ratesByCurrency?.[shown] ?? slice.epoch.rates
+          const match = findRate(table, entry.provider, entry.model)
           if (match === null) return 'unpriced'
           if (match.excluded === true) return 'excluded'
           return match.exact ? 'exact' : match.basis
         })(),
         calls: slice.entry.calls,
         tokens: slice.entry.tokens,
-        micros: slice.priced.micros,
-        savedMicros: slice.priced.savedMicros,
+        micros: slice.priced === null ? 0 : slice.priced.micros,
+        savedMicros: slice.priced === null ? 0 : slice.priced.savedMicros,
       })),
     }
   })
@@ -1603,19 +1729,24 @@ function viewOf(state, status = null, lookup = undefined) {
   }
   const billedCalls = state.calls - excludedCalls
 
-  // The totals are in the currency of the epoch that produced them. A mixed
-  // timeline inside one currency is fine; a timeline that crossed a currency
-  // would need FX, which is not something this plugin can invent, so the
-  // current epoch's currency labels the total and `currencyMixed` says so.
+  // The totals are in the currency this view was priced in. A timeline that
+  // crossed a currency is priced per epoch from that epoch's own table, so the
+  // total stays exact; `currencyMixed` records that the segments differed.
   const currencies = new Set(epochs.filter((epoch) => epoch.currency).map((epoch) => epoch.currency))
   // Delegated Sessions bill separately, so the parent's own fold cannot see
   // them. `subtree` adds what the Host cache knows about them; `unknownCount`
   // says how many children had no cached amount (so the total is a lower bound).
-  const subtree = subtreeOf(state, lookup)
+  const subtree = subtreeOf(state, lookup, shown)
   return {
-    currency: current.currency,
-    symbol: current.symbol,
+    currency: shown,
+    symbol,
+    /** Every currency this view has a published table for. */
+    currencies: available,
+    /** Set when the row config pins a currency, so the UI does not follow its language. */
+    pinnedCurrency: typeof pinnedCurrency === 'string' && available.includes(pinnedCurrency) ? pinnedCurrency : null,
     currencyMixed: currencies.size > 1,
+    /** Requests whose epoch never published this currency (so they are not in the amount). */
+    unpricedByCurrency,
     status,
     calls: billedCalls,
     excludedCalls,
@@ -1657,8 +1788,10 @@ function viewOf(state, status = null, lookup = undefined) {
       source: current.source,
       effectiveFrom: current.effectiveFrom,
       fetchedAt: current.fetchedAt,
-      currency: current.currency,
-      symbol: current.symbol,
+      currency: shown,
+      symbol,
+      /** Currencies with a published table for this epoch. */
+      currencies: available,
       exchangeRate: current.exchangeRate,
       peakWindows: current.peakWindows.map((window) => [...window]),
       weekdaysOnly: current.weekdaysOnly,
@@ -1683,10 +1816,10 @@ function viewOf(state, status = null, lookup = undefined) {
         symbol: epoch.symbol,
         source: epoch.source,
         pageVariant: typeof epoch.pageVariant === 'string' ? epoch.pageVariant : null,
-        // Peak rates per 1M tokens, so the dialog can show what each segment
-        // charged without a second Host read.
+        // Peak rates per 1M tokens in the displayed currency, so the dialog can
+        // show what each segment charged without a second Host read.
         rates: Object.fromEntries(
-          Object.entries(epoch.rates ?? {})
+          Object.entries(epoch.ratesByCurrency?.[shown] ?? epoch.rates ?? {})
             .filter(([, rate]) => rate !== null && rate !== undefined)
             .map(([key, rate]) => [key, { input: rate.input, cacheRead: rate.cacheRead, cacheWrite: rate.cacheWrite, output: rate.output }]),
         ),
@@ -1908,28 +2041,78 @@ function createRefreshController(options = {}) {
     warn(`[token-cost] pricing refresh degraded: ${reason}; keeping the current card`)
   }
 
-  /** Fetch the official pricing page; record freshness or degradation. */
+  /**
+   * The URL of the same page in the other language, when the configured source
+   * is one of the two official copies. Any other source has no counterpart, so
+   * it alone supplies the card.
+   */
+  const counterpartUrl = (url) => {
+    const value = String(url)
+    if (value === OFFICIAL_PRICING_URL) return OFFICIAL_PRICING_URL_EN
+    if (value === OFFICIAL_PRICING_URL_EN) return OFFICIAL_PRICING_URL
+    if (value.includes('/zh-cn/quick_start/pricing')) return OFFICIAL_PRICING_URL_EN
+    if (/\/quick_start\/pricing\/?$/.test(value)) return OFFICIAL_PRICING_URL
+    return null
+  }
+
+  /**
+   * Fetch the configured price page and, when it is an official copy, the other
+   * language copy too, then merge them into one dual-currency card.
+   *
+   * The configured page decides the primary currency; the counterpart only adds
+   * its own table. A counterpart failure is not a degradation — the primary
+   * amount is still exact, the secondary display just falls back to the primary
+   * currency.
+   *
+   * @returns {Promise<object | null>} the merged card, or `null` when the primary page was unusable.
+   */
+  const fetchPricingCards = async () => {
+    const primaryUrl = settings.pricingSource
+    const secondaryUrl = counterpartUrl(primaryUrl)
+    /** Fetch one page; `null` means "no usable card", with `reason` filled in. */
+    const outcome = { reason: null }
+    const fetchOne = async (url) => {
+      try {
+        const result = await web.fetch({ url }, fetchSignal(settings.fetchTimeoutMs))
+        if (isDisposed()) return null
+        if (!isSuccessfulResponse(result)) {
+          const statusCode = responseStatusCode(result)
+          outcome.reason = `HTTP ${statusCode === null ? 'no response' : statusCode}`
+          return null
+        }
+        const parsed = parsePricingPage(responseContent(result))
+        if (parsed === null) outcome.reason = `pricing page layout was not recognized by parser v${PARSER_VERSION}`
+        return parsed
+      } catch (error) {
+        outcome.reason = `fetch failed: ${messageOf(error)}`
+        return null
+      }
+    }
+    const primary = await fetchOne(primaryUrl)
+    if (isDisposed()) return null
+    if (primary === null) {
+      degradePricing(outcome.reason ?? `pricing page layout was not recognized by parser v${PARSER_VERSION}`)
+      return null
+    }
+    const secondary = secondaryUrl === null ? null : await fetchOne(secondaryUrl)
+    if (isDisposed()) return null
+    const merged = mergeCurrencyCards(primary, secondary)
+    if (merged === null) return null
+    return { ...merged, source: typeof primaryUrl === 'string' ? primaryUrl : settings.pricingSource }
+  }
+
+  /** Fetch the official pricing page(s); record freshness or degradation. */
   const runPricing = async () => {
     if (!pricingEnabled || !canFetch || pricingInFlight || isDisposed()) return
     pricingInFlight = true
     pricingStatus.attemptedAt = now()
     try {
-      const result = await web.fetch({ url: settings.pricingSource }, fetchSignal(settings.fetchTimeoutMs))
-      if (isDisposed()) return
-      if (!isSuccessfulResponse(result)) {
-        const statusCode = responseStatusCode(result)
-        degradePricing(`HTTP ${statusCode === null ? 'no response' : statusCode}`)
-        return
-      }
-      const parsed = parsePricingPage(responseContent(result))
-      if (parsed === null) {
-        degradePricing(`pricing page layout was not recognized by parser v${PARSER_VERSION}`)
-        return
-      }
+      const parsed = await fetchPricingCards()
+      if (isDisposed() || parsed === null) return
       const fetchedAt = now()
       pricingStatus.fetchedAt = fetchedAt
       pricingStatus.parserVersion = parsed.parserVersion
-      pricingStatus.source = typeof result.url === 'string' && result.url.length > 0 ? result.url : settings.pricingSource
+      pricingStatus.source = typeof parsed.source === 'string' && parsed.source.length > 0 ? parsed.source : settings.pricingSource
       pricingStatus.degraded = false
       pricingStatus.degradedReason = null
       pricingCard = { ...parsed, source: pricingStatus.source }
@@ -2090,17 +2273,29 @@ export function apply(ctx, config) {
    * `subtree.unknownCount` instead of being treated as free.
    */
   const ownAmounts = new Map()
+  /**
+   * Record one Session's own amount per published currency.
+   *
+   * A parent sums its children in whichever currency it displays, so the cache
+   * keeps one amount per currency rather than one amount plus a conversion.
+   */
   const rememberOwn = (sessionId, view) => {
     if (typeof sessionId !== 'string' || view === null || view === undefined || typeof view !== 'object') return
     const children = Array.isArray(view.children) ? view.children : []
+    const own = {}
+    for (const [code, amount] of Object.entries(view.amounts ?? {})) {
+      if (Number.isFinite(amount)) own[code] = amount
+    }
+    if (Object.keys(own).length === 0 && Number.isFinite(view.micros)) own[view.currency ?? 'CNY'] = view.micros
     const entry = {
-      own: Number.isFinite(view.micros) ? view.micros : 0,
+      own,
       calls: Number.isFinite(view.calls) ? view.calls : 0,
       children,
     }
     const previous = ownAmounts.get(sessionId)
     // Idempotent: a view read must not churn the cache (or the change feed).
-    if (previous !== undefined && previous.own === entry.own && previous.calls === entry.calls && previous.children.length === children.length && previous.children.every((id, index) => id === children[index])) return
+    const sameOwn = previous !== undefined && Object.keys(own).length === Object.keys(previous.own).length && Object.keys(own).every((code) => previous.own[code] === own[code])
+    if (previous !== undefined && sameOwn && previous.calls === entry.calls && previous.children.length === children.length && previous.children.every((id, index) => id === children[index])) return
     ownAmounts.set(sessionId, entry)
   }
   live.ownAmounts = ownAmounts
@@ -2116,11 +2311,56 @@ export function apply(ctx, config) {
     wire: {
       viewSchema: passthroughSchema,
       view: (state) => {
-        const value = viewOf(
-          syncEpochs(state, catalogEpochs()),
-          live.controller === null ? null : { ...live.controller.status(), catalogVersion: catalogVersionLabel() },
-          (id) => ownAmounts.get(id),
-        )
+        const synced = syncEpochs(state, catalogEpochs())
+        const status = live.controller === null ? null : { ...live.controller.status(), catalogVersion: catalogVersionLabel() }
+        const lookup = (id) => ownAmounts.get(id)
+        // Price once per currency this Session's timeline actually has a table
+        // for, so the client can follow the interface language without a second
+        // Host round trip or an invented exchange rate.
+        const codes = (() => {
+          const present = new Set()
+          for (const epoch of synced.epochs ?? [synced.pricing]) {
+            for (const code of Object.keys(epoch?.ratesByCurrency ?? {})) present.add(code)
+          }
+          if (present.size === 0 && typeof synced.pricing?.currency === 'string') present.add(synced.pricing.currency)
+          // The display currency leads so `viewOf` prices it by default.
+          const preferred = synced.pricing?.currency
+          const ordered = [...present]
+          return preferred !== undefined && present.has(preferred) ? [preferred, ...ordered.filter((code) => code !== preferred)] : ordered
+        })()
+        const primary = codes[0] ?? synced.pricing?.currency ?? 'CNY'
+        const pinned = settings.currency.length > 0 ? settings.currency : null
+        const value = viewOf(synced, status, lookup, primary, pinned)
+        const amounts = { [primary]: value.micros }
+        const subtreeAmounts = { [primary]: value.subtree.micros }
+        const bucketAmounts = { [primary]: value.bucketMicros }
+        const modelAmounts = { [primary]: value.models }
+        for (const code of codes.slice(1)) {
+          const alternate = viewOf(synced, status, lookup, code)
+          // An epoch without this currency's table prices in its own currency, so
+          // the alternate view would be a mislabeled copy — skip it instead.
+          if (alternate.currency !== code) continue
+          amounts[code] = alternate.micros
+          subtreeAmounts[code] = alternate.subtree.micros
+          bucketAmounts[code] = alternate.bucketMicros
+          modelAmounts[code] = alternate.models
+        }
+        // Per-model amounts in every currency, so a model row can be shown in the
+        // display currency without re-pricing it in the client.
+        const byCurrency = {}
+        for (const code of Object.keys(modelAmounts)) {
+          if (code === primary) continue
+          for (const [index, row] of (modelAmounts[code] ?? []).entries()) {
+            const target = value.models[index]
+            if (target === undefined || target.provider !== row.provider || target.model !== row.model) continue
+            byCurrency[`${row.provider}/${row.model}`] = byCurrency[`${row.provider}/${row.model}`] ?? {}
+            byCurrency[`${row.provider}/${row.model}`][code] = {
+              micros: row.micros,
+              peakMicros: row.peak.micros,
+              offPeakMicros: row.offPeak.micros,
+            }
+          }
+        }
         // `state.children` is what a parent reports; keep it on the wire so the
         // cache updater can record the delegation edges without a second fold.
         const children = Array.isArray(state.children) ? [...state.children] : []
@@ -2128,8 +2368,18 @@ export function apply(ctx, config) {
         // change feed never fired for this process (a restored history) would
         // otherwise be an unknown child in its parent's subtree total. Only a
         // changed entry writes, so the view stays idempotent.
-        rememberOwn(state.sessionId, { micros: value.micros, calls: value.calls, children })
-        return { ...value, children }
+        rememberOwn(state.sessionId, { ...value, amounts, children })
+        return {
+          ...value,
+          amounts,
+          bucketMicrosByCurrency: bucketAmounts,
+          models: value.models.map((row) => {
+            const alternate = byCurrency[`${row.provider}/${row.model}`]
+            return alternate === undefined ? row : { ...row, byCurrency: alternate }
+          }),
+          subtree: { ...value.subtree, amounts: subtreeAmounts },
+          children,
+        }
       },
     },
   })
@@ -2179,12 +2429,14 @@ export const internals = {
   PRICING_PAGE_VARIANTS,
   DEFAULT_HOLIDAY_SOURCE,
   DEFAULT_RATE_CARD,
+  DEFAULT_RATE_CARDS,
   DEFAULT_PEAK_WINDOWS,
   STATE_VERSION,
   PARSER_VERSION,
   HOLIDAY_RETRY_DELAYS_MS,
   parsePricingPage,
   parseModelPricingRow,
+  mergeCurrencyCards,
   parseHolidayPayload,
   markupToText,
   parsePeakWindows,

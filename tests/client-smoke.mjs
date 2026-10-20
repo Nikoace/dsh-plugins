@@ -328,6 +328,39 @@ for (const expected of ['Token cost', 'Peak spend', 'Off-peak spend', 'Saved off
 }
 assert.ok(!english.includes('{'), `no unresolved placeholders in the English render: ${english}`)
 
+// The money follows the interface language: the English render shows the USD
+// amount from the Host's USD table, not a conversion of the CNY one.
+{
+  const dual = {
+    ...view,
+    currencies: ['CNY', 'USD'],
+    amounts: { CNY: 20_345_678, USD: 3_050_000 },
+    subtree: { ...view.subtree, amounts: { CNY: 20_345_678, USD: 3_050_000 } },
+  }
+  const zhRender = render(dual)
+  assert.ok(zhRender.includes('¥20.35'), `the Chinese UI shows CNY: ${zhRender}`)
+  assert.ok(!zhRender.includes('$'), `the Chinese UI has no dollar amounts: ${zhRender}`)
+  const enRender = render(dual, tEn)
+  assert.ok(enRender.includes('$3.05'), `the English UI shows the USD amount: ${enRender}`)
+  assert.ok(!enRender.includes('¥'), `the English UI has no yuan amounts: ${enRender}`)
+}
+
+// A session where only the CNY table was fetched keeps its symbol in English:
+// the amount is never relabelled as dollars.
+{
+  const cnyOnly = render({ ...view, currencies: ['CNY'], amounts: { CNY: 12_345_678 } }, tEn)
+  assert.ok(cnyOnly.includes('¥12.35'), `a single-currency view keeps its own symbol: ${cnyOnly}`)
+  assert.ok(!cnyOnly.includes('$'), `a missing USD table is not faked: ${cnyOnly}`)
+}
+
+// A pinned currency wins over the interface language.
+{
+  const pinned = { ...view, currencies: ['CNY', 'USD'], amounts: { CNY: 20_345_678, USD: 3_050_000 }, pinnedCurrency: 'USD' }
+  assert.ok(render(pinned).includes('$20.35'), `a pinned USD view shows dollars even in the Chinese UI: ${render(pinned)}`)
+  const pinnedCny = { ...pinned, pinnedCurrency: 'CNY' }
+  assert.ok(render(pinnedCny, tEn).includes('¥20.35'), `a pinned CNY view shows yuan even in the English UI: ${render(pinnedCny, tEn)}`)
+}
+
 // A configured holiday list removes the missing-calendar warning and reports
 // per-source provenance (auto / manual / fixed anchors).
 const holidayView = {

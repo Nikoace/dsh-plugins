@@ -6,7 +6,7 @@ and offline test harnesses used to build them.
 | Plugin | Version | What it does |
 |---|---|---|
 | [`dsh-sidebar-clock`](dsh-sidebar-clock/README.md) | 1.1.0 | One card at the top of the sidebar: local clock, live deepseek peak/off-peak band, countdowns to the next weekend and the next Chinese public holiday, and the signed-in account balance. |
-| [`dsh-token-cost`](dsh-token-cost/README.md) | 1.4.0 | Prices the current Session in real time in CNY from the official DeepSeek rate card, with each request priced at the rate in force when it ran (a price change splits the timeline instead of freezing the conversation), separating peak/off-peak, cache-hit/cache-miss/cache-write input and output, a per-request breakdown dialog with the rate timeline and a sub-agent total, live staleness/degradation status, a holiday calendar with fixed-anchor fallback, and a separate report of excluded gateways (magpie/codex) that are billed elsewhere. |
+| [`dsh-token-cost`](dsh-token-cost/README.md) | 1.5.0 | Prices the current Session in real time from the official DeepSeek rate card, with the currency following the interface language (CNY from the zh-CN page, USD from the English page, each at its own published price) and each request priced at the rate in force when it ran (a price change splits the timeline instead of freezing the conversation), separating peak/off-peak, cache-hit/cache-miss/cache-write input and output, a per-request breakdown dialog with the rate timeline and a sub-agent total, live staleness/degradation status, a holiday calendar with fixed-anchor fallback, and a separate report of excluded gateways (magpie/codex) that are billed elsewhere. |
 | [`dsh-github`](dsh-github/README.md) | 1.1.0 | Adds model-facing GitHub tools (repository search and metadata, issues, pull requests and diffs, commits, files) plus a Settings → GitHub page for the token, default repository, and write policy; writes stay opt-in and approval-gated by default. |
 
 The two UI plugins are additive: they register into official slots (`sidebar.footer.action`,
@@ -71,8 +71,8 @@ override the config.
 dist/
 ├─ dsh-sidebar-clock-1.1.0.zip
 ├─ dsh-sidebar-clock-1.1.0.zip.sha256
-├─ dsh-token-cost-1.4.0.zip
-├─ dsh-token-cost-1.4.0.zip.sha256
+├─ dsh-token-cost-1.5.0.zip
+├─ dsh-token-cost-1.5.0.zip.sha256
 ├─ dsh-github-1.1.0.zip
 └─ dsh-github-1.1.0.zip.sha256
 ```
@@ -89,8 +89,8 @@ directory with the plugin manager (or repoint the profile's `link:` entry), and 
 format, so it can be checked with either tool:
 
 ```powershell
-Get-FileHash dist/dsh-token-cost-1.4.0.zip -Algorithm SHA256
-Get-Content dist/dsh-token-cost-1.4.0.zip.sha256
+Get-FileHash dist/dsh-token-cost-1.5.0.zip -Algorithm SHA256
+Get-Content dist/dsh-token-cost-1.5.0.zip.sha256
 ```
 
 ## Tests

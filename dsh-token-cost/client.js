@@ -67,18 +67,39 @@ window.__ModuleLoader__.load({
       'model.split': '高峰 {peak} · 低谷 {offPeak}',
       'note.estimated': '{count} 次请求无精确费率，按后备费率估算。',
       'note.unpriced': '{count} 次请求无匹配费率，未计入费用。',
+      'note.excluded': '{count} 次请求来自不计价的服务（{providers}），未计入金额。',
       'note.reasoning': '推理 token 已包含在输出计费中。',
       'pricing.official': '费率来源：官方价目表',
       'pricing.config': '费率来源：本地后备费率',
       'pricing.updated': '读取于 {time}',
-      'pricing.newSessions': '本会话费率在创建时冻结；新会话自动采用最新费率。',
+      'pricing.newSessions': '费率按请求发生时间取当时有效的价格；价格调整只影响调整之后的请求。',
+      'pricing.timeline': '费率时间线：{count} 段',
+      'pricing.timelineRow': '{from} 起 · 未缓存 ¥{input}/M · 缓存命中 ¥{cacheRead}/M · 输出 ¥{output}/M',
+      'pricing.timelineRowOpen': '{from} 起（当前）· 未缓存 ¥{input}/M · 缓存命中 ¥{cacheRead}/M · 输出 ¥{output}/M',
+      'pricing.excludedRoutes': '不计价：{providers}',
+      'model.excluded': '{count} 次未计价',
+      'model.epochs': '{count} 个费率时段',
       'pricing.holidaysMissing': '节假日日历：未配置，节假日将按高峰计费。',
-      'pricing.configLate': '（本会话创建时尚未获取官方价目表；新会话将使用官方数据）',
-      'pricing.holidaysMissingLate': '节假日日历：本会话创建时未获取（节假日按高峰计）；新会话会自动获取。',
+      'pricing.configLate': '（尚未成功读取官方价目表，暂用本地后备费率）',
+      'pricing.holidaysMissingLate': '节假日日历：尚未获取（节假日按高峰计）；获取后会自动更新。',
       'hint.show': '计价与费率说明',
       'hint.basis': '高峰按 UTC {windows} 判定；工作日与节假日按 UTC/北京日期判定。',
       'hint.holidaysAuto': '节假日日历：自动获取 {count} 天。',
       'hint.holidaysManual': '节假日日历：本地配置 {count} 天。',
+      'pill.ariaWarning': '（数据可能陈旧或降级）',
+      'status.staleBadge': '陈旧',
+      'status.degradedBadge': '降级',
+      'time.unknown': '未知',
+      'hint.ratesFrozen': '本会话最早的一段费率生效于 {time}。',
+      'hint.ratesFrozenNever': '本会话最初使用本地后备费率（当时尚未读取官方价目表）。',
+      'hint.ratesLive': '当前最新费率读取于 {time}。',
+      'hint.ratesNever': '当前尚未成功读取官方费率。',
+      'hint.ratesDegraded': '费率抓取异常：{reason}；仍使用 {time} 的费率。',
+      'hint.ratesStale': '费率数据已陈旧（最近成功读取 {time}）。',
+      'hint.holidaysProvenance': '节假日日历：自动 {auto} 天 · 手动 {manual} 天 · 固定锚点 {fixed} 天。',
+      'hint.holidaysFailed': '节假日获取失败：{reason}；下次重试 {time}。',
+      'hint.holidaysFailedNoRetry': '节假日获取失败：{reason}。',
+      'hint.holidaysStale': '节假日日历已陈旧（最近成功获取 {time}）。',
     }
 
     const en = {
@@ -119,18 +140,39 @@ window.__ModuleLoader__.load({
       'model.split': 'Peak {peak} · Off-peak {offPeak}',
       'note.estimated': '{count} request(s) used the fallback rate card.',
       'note.unpriced': '{count} request(s) matched no rate and are excluded.',
+      'note.excluded': '{count} request(s) came from services this meter does not price ({providers}) and are not in the amount.',
       'note.reasoning': 'Reasoning tokens are billed inside output tokens.',
       'pricing.official': 'Rates: official price page',
       'pricing.config': 'Rates: local fallback card',
       'pricing.updated': 'read {time}',
-      'pricing.newSessions': 'This session froze its rates at creation; new sessions use the latest.',
+      'pricing.newSessions': 'Each request is priced by the rate in force when it ran; a price change only affects requests after it.',
+      'pricing.timeline': 'Rate timeline: {count} segments',
+      'pricing.timelineRow': 'from {from} · uncached ¥{input}/M · cache read ¥{cacheRead}/M · output ¥{output}/M',
+      'pricing.timelineRowOpen': 'from {from} (current) · uncached ¥{input}/M · cache read ¥{cacheRead}/M · output ¥{output}/M',
+      'pricing.excludedRoutes': 'Not priced: {providers}',
+      'model.excluded': '{count} not priced',
+      'model.epochs': '{count} rate segments',
       'pricing.holidaysMissing': 'Holiday calendar: not configured; holidays are charged as peak.',
-      'pricing.configLate': ' (the official price page was not fetched yet when this session started; new sessions will use it)',
-      'pricing.holidaysMissingLate': 'Holiday calendar: not fetched when this session started (holidays are charged as peak); new sessions fetch it automatically.',
+      'pricing.configLate': ' (the official price page has not been read yet, so the local fallback card is in use)',
+      'pricing.holidaysMissingLate': 'Holiday calendar: not fetched yet (holidays are charged as peak); it updates automatically once fetched.',
       'hint.show': 'Pricing and rate details',
       'hint.basis': 'Peak uses UTC {windows}; weekday and holiday rules follow UTC/Beijing dates.',
       'hint.holidaysAuto': 'Holiday calendar: {count} days fetched automatically.',
       'hint.holidaysManual': 'Holiday calendar: {count} days configured locally.',
+      'pill.ariaWarning': ' (data may be stale or degraded)',
+      'status.staleBadge': 'stale',
+      'status.degradedBadge': 'degraded',
+      'time.unknown': 'unknown',
+      'hint.ratesFrozen': 'This session\'s earliest rate segment took effect at {time}.',
+      'hint.ratesFrozenNever': 'This session started on the local fallback card (the official price page had not been read yet).',
+      'hint.ratesLive': 'The latest rates were read at {time}.',
+      'hint.ratesNever': 'The official rates have not been fetched successfully yet.',
+      'hint.ratesDegraded': 'Rate refresh failed: {reason}; still using the rates from {time}.',
+      'hint.ratesStale': 'Rate data is stale (last successful read {time}).',
+      'hint.holidaysProvenance': 'Holiday calendar: {auto} auto · {manual} manual · {fixed} fixed anchors (days).',
+      'hint.holidaysFailed': 'Holiday fetch failed: {reason}; retrying at {time}.',
+      'hint.holidaysFailedNoRetry': 'Holiday fetch failed: {reason}.',
+      'hint.holidaysStale': 'Holiday calendar is stale (last successful fetch {time}).',
     }
 
     // Geometry, colors, type, and elevation copied from the shipped
@@ -157,6 +199,8 @@ window.__ModuleLoader__.load({
 .dsh-tc-hintWarn{position:absolute;top:1px;right:1px;width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-state-warn-primary,var(--dsw-alias-label-tertiary))}
 .dsh-tc-hint{display:flex;flex-direction:column;gap:4px;padding:2px 0 8px;margin-bottom:2px;border-bottom:.5px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary)}
 .dsh-tc-hint p{margin:0}
+.dsh-tc-pillWarn{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-warn-primary,var(--dsw-alias-label-tertiary))}
+.dsh-tc-badge{display:inline-flex;align-items:center;margin-right:6px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-warn-primary,var(--dsw-alias-label-secondary));font-size:11px;font-weight:500;line-height:16px}
 .dsh-tc-titleValue{font-variant-numeric:tabular-nums}
 .dsh-tc-titleRule{border-top:.5px solid var(--dsw-alias-border-l2);margin-bottom:10px}
 .dsh-tc-details{display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;margin:0;color:var(--dsw-alias-label-tertiary)}
@@ -166,6 +210,7 @@ window.__ModuleLoader__.load({
 .dsh-tc-model{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 16px}
 .dsh-tc-modelName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-tc-modelMeta{grid-column:1/-1;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.dsh-tc-modelExcluded .dsh-tc-modelName,.dsh-tc-modelExcluded span{color:var(--dsw-alias-label-tertiary);opacity:.75}
 .dsh-tc-note{margin:10px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
 `
 
@@ -207,45 +252,481 @@ window.__ModuleLoader__.load({
       return now
     }
 
-    /** Whether a UTC minute falls inside one window. */
-    function inWindow(minute, window) {
-      const [start, end] = window
-      return start < end ? minute >= start && minute < end : minute >= start || minute < end
-    }
+    // -----------------------------------------------------------------------
+    // Tariff policy — the canonical rules (peak windows, Beijing holidays) live
+    // in `shared/tariff` and are inlined below by `tools/sync-shared.mjs`.
+    // Never restate them in this file.
+    // -----------------------------------------------------------------------
 
-    /** `YYYY-MM-DD` for a moment in a fixed offset (the holiday calendar's dates). */
-    function dateKeyAt(timeMs, offsetMinutes) {
-      return new Date(timeMs + offsetMinutes * 60_000).toISOString().slice(0, 10)
+    // >>> token-cost:tariff-helpers
+    // >>> generated:tariff (canonical rules; do not edit — run `node tools/sync-shared.mjs`)
+    const Tariff = (() => {
+      /**
+       * Canonical DeepSeek tariff + Chinese public-holiday rules.
+       *
+       * This module is the single source of truth for the peak/off-peak band used by
+       * every plugin that displays or bills it:
+       *
+       * - `dsh-token-cost` (Host fold and Web UI),
+       * - `dsh-sidebar-clock` (Web UI band badge and countdowns).
+       *
+       * It is deliberately dependency-free and side-effect-free so it can be
+       * imported directly by the Host (`dsh-token-cost/tariff.js`) and *inlined*
+       * into the single-file Web clients by `tools/sync-shared.mjs` (the client
+       * module loader cannot resolve local imports). Generated copies carry a
+       * "DO NOT EDIT" header; `node tools/sync-shared.mjs --check` fails when a copy
+       * drifts from this file.
+       *
+       * Rule contract:
+       * - Peak windows are UTC minutes of the day, `[start, end)`; they may wrap
+       *   past midnight (`start > end`).
+       * - Weekends are off-peak all day when `weekdaysOnly` is on.
+       * - Chinese holidays are evaluated on the Beijing calendar (fixed UTC+8
+       *   offset, no DST). Dates come from an automated source, a manual list, or
+       *   the fixed statutory anchors (Jan 1 / May 1 / Oct 1) used for years whose
+       *   arrangements are not published yet.
+       *
+       * Changing any published rule means changing this file (and bumping
+       * `TARIFF_VERSION` when the *behaviour* changes), then regenerating the copies.
+       */
+
+      /** Rule revision; bump on behaviour changes so snapshots/UI can report it. */
+      const TARIFF_VERSION = 2
+
+      /** UTC peak windows: 01:00–04:00 and 06:00–10:00 (official rate card). */
+      const PEAK_WINDOWS = [
+        [60, 240],
+        [360, 600],
+      ]
+
+      /** Weekends are off-peak all day. */
+      const WEEKDAYS_ONLY = true
+
+      /** Chinese holiday dates are evaluated on the Beijing calendar (UTC+8). */
+      const HOLIDAY_OFFSET_MINUTES = 480
+
+      const MINUTES_PER_DAY = 1440
+      const MINUTE_MS = 60_000
+      const DAY_MS = 24 * 60 * MINUTE_MS
+
+      /**
+       * Fixed statutory anchors, used for years without a published arrangement
+       * (and as the offline fallback). Each entry is `[MM-DD, display name, days]`,
+       * where `days` is the length of the statutory block starting on that date:
+       * 元旦 is one day, 劳动节 and 国庆节 are seven consecutive days, and 春节 is
+       * seven days around the lunar New Year (which the fixed calendar cannot place,
+       * so only 02-01 is approximated). These are deliberately *estimates* for
+       * unpublished years: covering the whole block is much closer to the published
+       * arrangement than charging every adjusted day off as peak.
+       */
+      const FIXED_HOLIDAYS = [
+        ['01-01', '元旦', 1],
+        ['02-01', '春节', 7],
+        ['05-01', '劳动节', 5],
+        ['10-01', '国庆节', 7],
+      ]
+
+      /** Zero-pad a non-negative integer to two digits. */
+      function pad2(value) {
+        return String(value).padStart(2, '0')
+      }
+
+      /**
+       * `YYYY-MM-DD` of a moment in a fixed UTC offset.
+       *
+       * @param {number} timeMs - epoch milliseconds.
+       * @param {number} [offsetMinutes] - fixed offset; defaults to Beijing (+480).
+       * @returns {string} date key.
+       */
+      function dateKeyAt(timeMs, offsetMinutes = HOLIDAY_OFFSET_MINUTES) {
+        return new Date(timeMs + offsetMinutes * MINUTE_MS).toISOString().slice(0, 10)
+      }
+
+      /**
+       * `YYYY-MM-DD` of a moment on the Beijing calendar.
+       *
+       * @param {number} timeMs - epoch milliseconds.
+       * @returns {string} date key.
+       */
+      function beijingDateKey(timeMs) {
+        return dateKeyAt(timeMs, HOLIDAY_OFFSET_MINUTES)
+      }
+
+      /**
+       * Weekday (0 = Sunday … 6 = Saturday) of a `YYYY-MM-DD` date key.
+       *
+       * Used so the weekday rule reads the same calendar date as the holiday rule.
+       *
+       * @param {string} key - `YYYY-MM-DD`.
+       * @returns {number} weekday, or `-1` when the key is invalid.
+       */
+      function weekdayOfDateKey(key) {
+        if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return -1
+        const parsed = Date.parse(`${key}T00:00:00.000Z`)
+        return Number.isFinite(parsed) ? new Date(parsed).getUTCDay() : -1
+      }
+
+      /** UTC minute of day (0..1439). */
+      function utcMinuteOfDay(timeMs) {
+        const minutes = Math.floor(timeMs / MINUTE_MS) % MINUTES_PER_DAY
+        return (minutes + MINUTES_PER_DAY) % MINUTES_PER_DAY
+      }
+
+      /**
+       * Whether a minute-of-day falls inside a `[start, end)` window (wrap-aware).
+       *
+       * @param {number} minute - minute of day.
+       * @param {number[]} window - `[start, end)` minutes.
+       * @returns {boolean} inside.
+       */
+      function inWindow(minute, window) {
+        const start = window[0]
+        const end = window[1]
+        return start < end ? minute >= start && minute < end : minute >= start || minute < end
+      }
+
+      /**
+       * Validate and copy a peak-window list.
+       *
+       * @param {unknown} value - candidate windows.
+       * @returns {number[][] | null} normalized windows, or `null` when invalid.
+       */
+      function normalizePeakWindows(value) {
+        if (!Array.isArray(value) || value.length === 0) return null
+        const windows = []
+        for (const entry of value) {
+          if (!Array.isArray(entry) || entry.length !== 2) return null
+          const start = entry[0]
+          const end = entry[1]
+          if (!Number.isInteger(start) || !Number.isInteger(end)) return null
+          if (start < 0 || start >= MINUTES_PER_DAY || end < 0 || end > MINUTES_PER_DAY || start === end) return null
+          windows.push([start, end])
+        }
+        return windows
+      }
+
+      /**
+       * Whether a holiday calendar contains one date key.
+       *
+       * Accepts the shapes the plugins carry around: an array of `YYYY-MM-DD`
+       * keys (Host snapshot), a `Set`, or a date-keyed map (Web clock).
+       *
+       * @param {unknown} holidays - calendar.
+       * @param {string} key - `YYYY-MM-DD`.
+       * @returns {boolean} present.
+       */
+      function hasHoliday(holidays, key) {
+        if (holidays === undefined || holidays === null) return false
+        if (Array.isArray(holidays)) return holidays.includes(key)
+        if (holidays instanceof Set) return holidays.has(key)
+        if (typeof holidays === 'object') return Object.hasOwn(holidays, key)
+        return false
+      }
+
+      /**
+       * The tariff band at one moment under a policy.
+       *
+       * The policy is a plain object so it can travel both in the Host's frozen
+       * pricing snapshot and inside the Web clients:
+       *
+       * - `peakWindows` (default `PEAK_WINDOWS`),
+       * - `weekdaysOnly` (default true),
+       * - `offPeakEnabled` (default true; `false` means "all peak"),
+       * - `holidayOffsetMinutes` (default +480),
+       * - `holidays` (array / Set / date-keyed map; default empty).
+       *
+       * Missing windows means the source published none, so every moment is
+       * off-peak; `offPeakEnabled: false` short-circuits to peak.
+       *
+       * @param {number} timeMs - epoch milliseconds.
+       * @param {object} [policy] - band policy.
+       * @returns {'peak' | 'offPeak'} the band.
+       */
+      function bandAt(timeMs, policy) {
+        const p = policy ?? {}
+        if (p.offPeakEnabled === false) return 'peak'
+        const windows = Array.isArray(p.peakWindows) ? p.peakWindows : PEAK_WINDOWS
+        if (windows.length === 0) return 'offPeak'
+        const offset = typeof p.holidayOffsetMinutes === 'number' ? p.holidayOffsetMinutes : HOLIDAY_OFFSET_MINUTES
+        const key = dateKeyAt(timeMs, offset)
+        if (p.weekdaysOnly !== false) {
+          // The weekday must come from the *same* calendar the holiday lookup uses,
+          // otherwise the last hours of a Beijing Saturday (Friday 22:00–24:00 UTC)
+          // are billed peak: UTC says Friday, Beijing says Saturday.
+          if (weekdayOfDateKey(key) === 0 || weekdayOfDateKey(key) === 6) return 'offPeak'
+        }
+        if (hasHoliday(p.holidays, key)) return 'offPeak'
+        return windows.some((window) => inWindow(utcMinuteOfDay(timeMs), window)) ? 'peak' : 'offPeak'
+      }
+
+      /**
+       * The next moment the band changes (minute resolution), or `0` when the band
+       * is stable for the whole scan window.
+       *
+       * The scan is bounded so a misconfigured all-off-peak policy cannot spin
+       * forever; 10 days covers a peak window plus a holiday week with margin.
+       *
+       * @param {number} fromMs - epoch milliseconds.
+       * @param {object} [policy] - band policy (see `bandAt`).
+       * @param {number} [maxDays] - scan bound in days.
+       * @returns {number} next switch epoch ms, or `0`.
+       */
+      function nextBandSwitch(fromMs, policy, maxDays = 10) {
+        const band = bandAt(fromMs, policy)
+        const limit = Math.max(1, Math.floor(maxDays)) * MINUTES_PER_DAY
+        for (let delta = 1; delta <= limit; delta += 1) {
+          const candidate = fromMs + delta * MINUTE_MS
+          if (bandAt(candidate, policy) !== band) return candidate
+        }
+        return 0
+      }
+
+      /**
+       * Beijing years a calendar must cover at `timeMs`: the current one and the
+       * next one (so countdowns never fall off the end of the calendar).
+       *
+       * @param {number} timeMs - epoch milliseconds.
+       * @param {number} [offsetMinutes] - fixed offset; defaults to Beijing (+480).
+       * @returns {number[]} two ascending years.
+       */
+      function holidayYears(timeMs, offsetMinutes = HOLIDAY_OFFSET_MINUTES) {
+        const year = new Date(timeMs + offsetMinutes * MINUTE_MS).getUTCFullYear()
+        return [year, year + 1]
+      }
+
+      /**
+       * Sorted fixed-anchor date keys for one or more years.
+       *
+       * A statutory block contributes every day it spans (`days` in
+       * `FIXED_HOLIDAYS`); a block ending in the next month or year is resolved on
+       * the real calendar, so 12-30 + 7 days still produces valid keys.
+       *
+       * @param {number[]} years - years.
+       * @returns {string[]} `YYYY-MM-DD` keys.
+       */
+      function fixedHolidayDateKeys(years) {
+        const keys = []
+        for (const year of years) {
+          for (const fixed of FIXED_HOLIDAYS) {
+            const start = Date.parse(`${year}-${fixed[0]}T00:00:00.000Z`)
+            if (!Number.isFinite(start)) continue
+            const length = Number.isInteger(fixed[2]) && fixed[2] > 0 ? fixed[2] : 1
+            for (let index = 0; index < length; index += 1) {
+              keys.push(new Date(start + index * DAY_MS).toISOString().slice(0, 10))
+            }
+          }
+        }
+        return [...new Set(keys)].sort()
+      }
+
+      /**
+       * Sorted fixed-anchor entries for one or more years, each with its display
+       * name, so a calendar built from anchors can still label a date.
+       *
+       * @param {number[]} years - years.
+       * @returns {Array<{ date: string, name: string }>} sorted entries.
+       */
+      function fixedHolidayEntries(years) {
+        const byDate = new Map()
+        for (const year of years) {
+          for (const fixed of FIXED_HOLIDAYS) {
+            const start = Date.parse(`${year}-${fixed[0]}T00:00:00.000Z`)
+            if (!Number.isFinite(start)) continue
+            const length = Number.isInteger(fixed[2]) && fixed[2] > 0 ? fixed[2] : 1
+            for (let index = 0; index < length; index += 1) {
+              const date = new Date(start + index * DAY_MS).toISOString().slice(0, 10)
+              if (!byDate.has(date)) byDate.set(date, { date, name: fixed[1] })
+            }
+          }
+        }
+        return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date))
+      }
+
+      /**
+       * Build a named holiday calendar from entries.
+       *
+       * Entries are `{ date, name }` objects or plain `YYYY-MM-DD` strings. Fixed
+       * statutory anchors are added for every requested year unless the calendar
+       * already names that date.
+       *
+       * @param {Array<{date: string, name?: string} | string>} entries - calendar entries.
+       * @param {number[]} years - years to fill with fixed anchors.
+       * @returns {Record<string, string>} date key -> display name.
+       */
+      function holidayDatesForYears(entries, years) {
+        const dates = {}
+        for (const entry of entries ?? []) {
+          const date = typeof entry === 'string' ? entry : entry === null || typeof entry !== 'object' ? undefined : entry.date
+          if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+          const name = typeof entry === 'object' && entry !== null && typeof entry.name === 'string' ? entry.name : ''
+          if (name !== '') dates[date] = name
+          else if (dates[date] === undefined) dates[date] = ''
+        }
+        for (const anchor of fixedHolidayEntries(years ?? [])) {
+          if (dates[anchor.date] === undefined) dates[anchor.date] = anchor.name
+        }
+        return dates
+      }
+
+      /**
+       * Split a holiday calendar into provenance buckets (auto / manual / fixed).
+       *
+       * Every key appears in exactly one bucket; fixed anchors fill the years that
+       * neither source published. The union of the buckets is the calendar used for
+       * band decisions.
+       *
+       * @param {{ auto?: string[], manual?: string[], years?: number[] }} sources - calendar sources.
+       * @returns {{ auto: string[], manual: string[], fixed: string[] }} sorted buckets.
+       */
+      function holidayProvenance(sources) {
+        const manual = new Set()
+        for (const key of sources?.manual ?? []) {
+          if (typeof key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(key)) manual.add(key)
+        }
+        const auto = new Set()
+        for (const key of sources?.auto ?? []) {
+          if (typeof key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(key) && !manual.has(key)) auto.add(key)
+        }
+        const fixed = new Set()
+        for (const key of fixedHolidayDateKeys(sources?.years ?? [])) {
+          if (!manual.has(key) && !auto.has(key)) fixed.add(key)
+        }
+        return { auto: [...auto].sort(), manual: [...manual].sort(), fixed: [...fixed].sort() }
+      }
+
+      /**
+       * Sorted union of one provenance object.
+       *
+       * @param {{ auto?: string[], manual?: string[], fixed?: string[] }} provenance - buckets.
+       * @returns {string[]} sorted date keys.
+       */
+      function provenanceDates(provenance) {
+        const keys = new Set()
+        for (const bucket of ['auto', 'manual', 'fixed']) {
+          for (const key of provenance?.[bucket] ?? []) {
+            if (typeof key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(key)) keys.add(key)
+          }
+        }
+        return [...keys].sort()
+      }
+
+      /**
+       * Parse one public-holiday JSON payload into `{ date, name }` entries.
+       *
+       * Accepted shapes, covering the common machine-readable sources:
+       * - `["2026-10-01", ...]` or `{ dates: [...] }`;
+       * - Nager.Date's `[{ date: "2026-10-01", localName }, ...]`;
+       * - timor.tech's `{ holiday: { "10-01": { holiday: true, date, name } } }`
+       *   (entries with `holiday: false` are makeup workdays and are skipped).
+       *
+       * @param {unknown} payload - parsed JSON body.
+       * @param {number} year - requested year; entries outside it are ignored.
+       * @returns {{ date: string, name: string }[]} sorted, de-duplicated entries.
+       */
+      function holidayEntriesFromPayload(payload, year) {
+        const entries = []
+        const push = (date, name) => {
+          if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return
+          if (!date.startsWith(`${year}-`)) return
+          entries.push({ date, name: typeof name === 'string' ? name : '' })
+        }
+        if (Array.isArray(payload)) {
+          for (const entry of payload) {
+            if (typeof entry === 'string') push(entry, '')
+            else if (entry !== null && typeof entry === 'object') push(entry.date, typeof entry.localName === 'string' ? entry.localName : entry.name)
+          }
+        } else if (payload !== null && typeof payload === 'object') {
+          if (Array.isArray(payload.dates)) {
+            for (const entry of payload.dates) {
+              if (typeof entry === 'string') push(entry, '')
+              else if (entry !== null && typeof entry === 'object') push(entry.date, entry.name)
+            }
+          } else if (payload.holiday !== null && typeof payload.holiday === 'object' && !Array.isArray(payload.holiday)) {
+            for (const [key, entry] of Object.entries(payload.holiday)) {
+              if (entry === null || typeof entry !== 'object' || entry.holiday !== true) continue
+              const date = typeof entry.date === 'string' ? entry.date : /^\d{2}-\d{2}$/.test(key) ? `${year}-${key}` : undefined
+              push(date, entry.name)
+            }
+          }
+        }
+        const byDate = new Map()
+        for (const entry of entries) {
+          const previous = byDate.get(entry.date)
+          if (previous === undefined || (previous.name === '' && entry.name !== '')) byDate.set(entry.date, entry)
+        }
+        return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date))
+      }
+
+      /**
+       * Parse one public-holiday JSON payload into sorted `YYYY-MM-DD` keys.
+       *
+       * @param {unknown} payload - parsed JSON body.
+       * @param {number} year - requested year; entries outside it are ignored.
+       * @returns {string[]} sorted holiday keys.
+       */
+      function parseHolidayPayload(payload, year) {
+        return holidayEntriesFromPayload(payload, year).map((entry) => entry.date)
+      }
+
+      return {
+        TARIFF_VERSION,
+        PEAK_WINDOWS,
+        WEEKDAYS_ONLY,
+        HOLIDAY_OFFSET_MINUTES,
+        MINUTES_PER_DAY,
+        MINUTE_MS,
+        DAY_MS,
+        FIXED_HOLIDAYS,
+        pad2,
+        dateKeyAt,
+        beijingDateKey,
+        weekdayOfDateKey,
+        utcMinuteOfDay,
+        inWindow,
+        normalizePeakWindows,
+        hasHoliday,
+        bandAt,
+        nextBandSwitch,
+        holidayYears,
+        fixedHolidayDateKeys,
+        fixedHolidayEntries,
+        holidayDatesForYears,
+        holidayProvenance,
+        provenanceDates,
+        holidayEntriesFromPayload,
+        parseHolidayPayload,
+      }
+    })()
+    // <<< generated:tariff
+
+    /** Band policy for a frozen pricing snapshot. */
+    function bandPolicy(pricing) {
+      return {
+        peakWindows: Array.isArray(pricing.peakWindows) ? pricing.peakWindows : [],
+        weekdaysOnly: pricing.weekdaysOnly,
+        offPeakEnabled: pricing.offPeakEnabled,
+        holidayOffsetMinutes:
+          typeof pricing.holidayOffsetMinutes === 'number' ? pricing.holidayOffsetMinutes : Tariff.HOLIDAY_OFFSET_MINUTES,
+        holidays: Array.isArray(pricing.holidays) ? pricing.holidays : [],
+      }
     }
 
     /**
-     * The band at one moment under the frozen policy, mirroring the Host:
-     * catalog UTC peak windows, weekdays-only, Chinese holidays in Beijing dates.
+     * The band at one moment under the frozen policy (canonical rule, mirroring
+     * the Host exactly: catalog UTC peak windows, weekdays-only, Beijing holidays).
      */
     function bandAt(pricing, timeMs) {
-      if (pricing === undefined || pricing === null || pricing.offPeakEnabled === false) return 'peak'
-      const windows = Array.isArray(pricing.peakWindows) ? pricing.peakWindows : []
-      if (windows.length === 0) return 'offPeak'
-      if (pricing.weekdaysOnly !== false) {
-        const weekday = new Date(timeMs).getUTCDay()
-        if (weekday === 0 || weekday === 6) return 'offPeak'
-      }
-      const holidays = Array.isArray(pricing.holidays) ? pricing.holidays : []
-      if (holidays.length > 0 && holidays.includes(dateKeyAt(timeMs, pricing.holidayOffsetMinutes ?? 480))) return 'offPeak'
-      const minute = Math.floor(timeMs / 60_000) % 1440
-      const normalized = (minute + 1440) % 1440
-      return windows.some((window) => inWindow(normalized, window)) ? 'peak' : 'offPeak'
+      if (pricing === undefined || pricing === null) return 'peak'
+      return Tariff.bandAt(timeMs, bandPolicy(pricing))
     }
 
-    /** Minutes until the current band changes (scans at most one week). */
+    /** Minutes until the current band changes (canonical bounded scan). */
     function minutesUntilSwitch(pricing, now) {
       if (pricing === undefined || pricing === null || pricing.offPeakEnabled === false) return null
-      const current = bandAt(pricing, now)
-      for (let delta = 1; delta <= 7 * 1440; delta += 1) {
-        if (bandAt(pricing, now + delta * 60_000) !== current) return delta
-      }
-      return null
+      const switchAt = Tariff.nextBandSwitch(now, bandPolicy(pricing), 10)
+      return switchAt === 0 ? null : Math.round((switchAt - now) / Tariff.MINUTE_MS)
     }
+    // <<< token-cost:tariff-helpers
 
     /** `HH:MM` for a minute-of-day value. */
     function clockOf(minutes) {
@@ -338,6 +819,57 @@ window.__ModuleLoader__.load({
       return 'config'
     }
 
+    /**
+     * Whether the live Host status says the displayed data may be stale or
+     * degraded. `view.status` is live, not frozen, so it is absent when the Host
+     * half runs without a web service.
+     */
+    function dataWarningOf(status) {
+      if (status === null || status === undefined || typeof status !== 'object') return null
+      const pricing = status.pricing ?? {}
+      const holidays = status.holidays ?? {}
+      if (pricing.degraded === true) return 'pricing'
+      if (pricing.stale === true) return 'pricing'
+      if (typeof holidays.error === 'string' && holidays.error.length > 0) return 'holidays'
+      if (holidays.stale === true) return 'holidays'
+      return null
+    }
+
+    /** The badge locale key for the current warning, or `null` when healthy. */
+    function statusBadgeKeyOf(status) {
+      if (status === null || status === undefined || typeof status !== 'object') return null
+      const pricing = status.pricing ?? {}
+      const holidays = status.holidays ?? {}
+      const holidayFailed = typeof holidays.error === 'string' && holidays.error.length > 0
+      if (pricing.degraded === true || holidayFailed) return 'status.degradedBadge'
+      if (pricing.stale === true || holidays.stale === true) return 'status.staleBadge'
+      return null
+    }
+
+    /** A localized timestamp for the hint lines, `unknown` when never fetched. */
+    function hintTimeText(timeMs, t) {
+      return typeof timeMs === 'number' && Number.isFinite(timeMs) && timeMs > 0 ? new Date(timeMs).toLocaleString() : t('time.unknown')
+    }
+
+    /**
+     * Holiday counts per provenance source. Older Host snapshots only carry the
+     * flat calendar plus a `holidaysSource` label, so fall back to that.
+     */
+    function holidayProvenanceOf(pricing) {
+      const provenance = pricing?.holidayProvenance
+      if (provenance !== null && provenance !== undefined && typeof provenance === 'object') {
+        const count = (value) => (Array.isArray(value) ? value.length : 0)
+        return { auto: count(provenance.auto), manual: count(provenance.manual), fixed: count(provenance.fixed), known: true }
+      }
+      const holidays = Array.isArray(pricing?.holidays) ? pricing.holidays.length : 0
+      return {
+        auto: pricing?.holidaysSource === 'auto' ? holidays : 0,
+        manual: pricing?.holidaysSource === 'auto' ? 0 : holidays,
+        fixed: 0,
+        known: false,
+      }
+    }
+
     /** One definition row. */
     function Row({ label, value }) {
       return h(React.Fragment, null, h('dt', null, label), h('dd', null, value))
@@ -364,18 +896,77 @@ window.__ModuleLoader__.load({
       const localWindows = localWindowsText(pricing, now)
       const utcWindows = windowsText(pricing)
       const official = sourceText(pricing) === 'official'
-      const updated = typeof pricing.fetchedAt === 'number' ? t('pricing.updated', { time: new Date(pricing.fetchedAt).toLocaleString() }) : null
+      const updated = typeof pricing.fetchedAt === 'number' && pricing.fetchedAt > 0 ? t('pricing.updated', { time: new Date(pricing.fetchedAt).toLocaleString() }) : null
       const holidayCount = Array.isArray(pricing.holidays) ? pricing.holidays.length : 0
       const autoPricing = pricing.autoRefresh?.pricing === true
       const autoHolidays = pricing.autoRefresh?.holidays === true
       const showHolidayWarning = pricing.weekdaysOnly !== false && holidayCount === 0
+      const provenance = holidayProvenanceOf(pricing)
       const holidayLine = showHolidayWarning
         ? autoHolidays
           ? t('pricing.holidaysMissingLate')
           : t('pricing.holidaysMissing')
-        : pricing.holidaysSource === 'auto'
-          ? t('hint.holidaysAuto', { count: holidayCount })
-          : t('hint.holidaysManual', { count: holidayCount })
+        : provenance.known
+          ? t('hint.holidaysProvenance', { auto: provenance.auto, manual: provenance.manual, fixed: provenance.fixed })
+          : pricing.holidaysSource === 'auto'
+            ? t('hint.holidaysAuto', { count: holidayCount })
+            : t('hint.holidaysManual', { count: holidayCount })
+
+      // Live data-trust lines: the rate timeline says what *this* session is
+      // priced with, `view.status` says how current the Host's data is.
+      const status = view.status ?? null
+      const badgeKey = statusBadgeKeyOf(status)
+      const statusLines = []
+      const timeline = Array.isArray(pricing.epochs) ? pricing.epochs : []
+      const excludedProviders = [...new Set(modelRows.filter((entry) => entry.excludedCalls > 0).map((entry) => entry.provider))]
+      // The rate timeline as human lines: one per epoch, oldest first, showing
+      // the rates that segment actually charged (the first model it priced).
+      const timelineRows = timeline.map((epoch, index) => {
+        const rates = epoch.rates ?? {}
+        const first = Object.keys(rates)[0]
+        const rate = first === undefined ? null : rates[first]
+        const open = index === timeline.length - 1
+        const params = {
+          from: hintTimeText(epoch.effectiveFrom, t),
+          input: rate === null ? '?' : String(rate.input),
+          cacheRead: rate === null ? '?' : String(rate.cacheRead),
+          output: rate === null ? '?' : String(rate.output),
+        }
+        return t(open ? 'pricing.timelineRowOpen' : 'pricing.timelineRow', params)
+      })
+      if (status !== null && status !== undefined) {
+        const livePricing = status.pricing ?? {}
+        const liveHolidays = status.holidays ?? {}
+        // (a) the rate segment this session started on vs the live one.
+        statusLines.push(
+          timeline.length > 0 && typeof timeline[0].effectiveFrom === 'number' && timeline[0].effectiveFrom > 0
+            ? t('hint.ratesFrozen', { time: hintTimeText(timeline[0].effectiveFrom, t) })
+            : typeof pricing.fetchedAt === 'number' && pricing.fetchedAt > 0
+              ? t('hint.ratesFrozen', { time: hintTimeText(pricing.fetchedAt, t) })
+              : t('hint.ratesFrozenNever'),
+        )
+        if (livePricing.degraded === true) {
+          statusLines.push(t('hint.ratesDegraded', { reason: String(livePricing.degradedReason ?? t('time.unknown')), time: hintTimeText(livePricing.fetchedAt, t) }))
+        } else if (livePricing.stale === true) {
+          statusLines.push(t('hint.ratesStale', { time: hintTimeText(livePricing.fetchedAt, t) }))
+        } else if (typeof livePricing.fetchedAt === 'number' && livePricing.fetchedAt > 0) {
+          statusLines.push(t('hint.ratesLive', { time: hintTimeText(livePricing.fetchedAt, t) }))
+        } else {
+          statusLines.push(t('hint.ratesNever'))
+        }
+        // (b) holiday refresh state, including the failure and retry time.
+        const holidayError = typeof liveHolidays.error === 'string' && liveHolidays.error.length > 0 ? liveHolidays.error : null
+        if (holidayError !== null) {
+          const retryAt = typeof liveHolidays.nextRetryAt === 'number' && liveHolidays.nextRetryAt > 0 ? liveHolidays.nextRetryAt : null
+          statusLines.push(
+            retryAt === null
+              ? t('hint.holidaysFailedNoRetry', { reason: holidayError })
+              : t('hint.holidaysFailed', { reason: holidayError, time: hintTimeText(retryAt, t) }),
+          )
+        } else if (liveHolidays.stale === true) {
+          statusLines.push(t('hint.holidaysStale', { time: hintTimeText(liveHolidays.fetchedAt, t) }))
+        }
+      }
       return h(
         'div',
         {
@@ -416,8 +1007,15 @@ window.__ModuleLoader__.load({
           ? h(
               'div',
               { className: 'dsh-tc-hint' },
+              badgeKey === null
+                ? null
+                : h('p', { className: 'dsh-tc-hintStatus' }, h('span', { className: 'dsh-tc-badge dsh-tc-badgeWarn' }, t(badgeKey))),
               h('p', null, `${t(official ? 'pricing.official' : 'pricing.config')}${updated === null ? '' : ` · ${updated}`}${!official && autoPricing ? t('pricing.configLate') : ''}`),
+              ...statusLines.map((line, index) => h('p', { key: `status-${index}` }, line)),
               h('p', null, t('hint.basis', { windows: utcWindows })),
+              timeline.length > 0 ? h('p', null, t('pricing.timeline', { count: timeline.length })) : null,
+              ...timelineRows.map((row, index) => h('p', { key: `timeline-${index}` }, row)),
+              excludedProviders.length > 0 ? h('p', null, t('pricing.excludedRoutes', { providers: excludedProviders.join(', ') })) : null,
               h('p', null, holidayLine),
               h('p', null, t('pricing.newSessions')),
               pricing.reasoningBilling === 'included' ? h('p', null, t('note.reasoning')) : null,
@@ -450,18 +1048,28 @@ window.__ModuleLoader__.load({
           localWindows.length > 0 ? h(Row, { label: t('label.peakWindows'), value: t('window.local', { windows: localWindows, zone: systemTimeZone() }) }) : null,
           utcWindows.length > 0 ? h(Row, { label: t('label.ruleBasis'), value: t('window.utc', { windows: utcWindows }) }) : null,
           modelRows.length > 0 ? h('dt', { className: 'dsh-tc-section' }, t('section.models')) : null,
-          ...modelRows.map((entry) =>
-            h(
+          ...modelRows.map((entry) => {
+            const excluded = entry.excludedCalls > 0
+            const segments = Array.isArray(entry.epochs) ? entry.epochs.length : 0
+            const meta = excluded
+              ? t('model.excluded', { count: entry.excludedCalls })
+              : `${t('model.split', { peak: formatMoney(entry.peak.micros, symbol), offPeak: formatMoney(entry.offPeak.micros, symbol) })}${
+                  segments > 1 ? ` · ${t('model.epochs', { count: segments })}` : ''
+                }`
+            return h(
               'div',
-              { className: 'dsh-tc-model', key: `${entry.provider}/${entry.model}` },
+              { className: excluded ? 'dsh-tc-model dsh-tc-modelExcluded' : 'dsh-tc-model', key: `${entry.provider}/${entry.model}` },
               h('span', { className: 'dsh-tc-modelName', title: `${entry.provider}/${entry.model}` }, entry.model),
-              h('span', null, t('model.value', { cost: formatMoney(entry.micros, symbol), count: entry.calls })),
-              h('span', { className: 'dsh-tc-modelMeta' }, t('model.split', { peak: formatMoney(entry.peak.micros, symbol), offPeak: formatMoney(entry.offPeak.micros, symbol) })),
-            ),
-          ),
+              h('span', null, t('model.value', { cost: excluded ? '—' : formatMoney(entry.micros, symbol), count: entry.calls })),
+              h('span', { className: 'dsh-tc-modelMeta' }, meta),
+            )
+          }),
         ),
         view.estimatedCalls > 0 ? h('p', { className: 'dsh-tc-note' }, t('note.estimated', { count: view.estimatedCalls })) : null,
         view.unpricedCalls > 0 ? h('p', { className: 'dsh-tc-note' }, t('note.unpriced', { count: view.unpricedCalls })) : null,
+        excludedProviders.length > 0
+          ? h('p', { className: 'dsh-tc-note' }, t('note.excluded', { count: view.excludedCalls ?? 0, providers: excludedProviders.join(', ') }))
+          : null,
       )
     }
 
@@ -534,6 +1142,10 @@ window.__ModuleLoader__.load({
       const band = bandAt(view.pricing, now)
       const bandLabel = t(band === 'offPeak' ? 'band.offPeak' : 'band.peak')
       const cost = formatMoney(view.micros, view.symbol)
+      // A subtle amber dot makes a stale/degraded data source discoverable
+      // without opening the dialog or reading logs.
+      const warning = dataWarningOf(view.status ?? null)
+      const warningSuffix = warning === null ? '' : t('pill.ariaWarning')
       const anchorElement = h(
         'span',
         { ref: rootRef, className: 'dsh-tc-anchor', 'data-composer-stat': 'cost' },
@@ -545,10 +1157,11 @@ window.__ModuleLoader__.load({
             className: 'dsh-tc-pill',
             'aria-haspopup': 'dialog',
             'aria-expanded': open,
-            'aria-label': t('pill.aria', { cost, band: bandLabel }),
+            'aria-label': `${t('pill.aria', { cost, band: bandLabel })}${warningSuffix}`,
             onClick: () => setOpen((value) => !value),
           },
           h(CostIcon),
+          warning === null ? null : h('span', { className: 'dsh-tc-pillWarn', 'aria-hidden': true }),
           h('span', { className: 'dsh-tc-label' }, cost),
           h('span', { className: 'dsh-tc-sep', 'aria-hidden': true }, '·'),
           h('span', { className: band === 'offPeak' ? 'dsh-tc-band dsh-tc-offPeak' : 'dsh-tc-band dsh-tc-peak' }, h('span', { className: 'dsh-tc-dot', 'aria-hidden': true }), bandLabel),

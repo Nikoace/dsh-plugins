@@ -103,11 +103,13 @@ const t = (key, params = {}) => {
 }
 
 const view = {
-  currency: 'USD',
-  symbol: '$',
+  currency: 'CNY',
+  symbol: '¥',
   calls: 3,
   unpricedCalls: 0,
   estimatedCalls: 1,
+  excludedCalls: 0,
+  excludedTokens: 0,
   micros: 12_345_678,
   peakMicros: 9_000_000,
   offPeakMicros: 3_345_678,
@@ -128,15 +130,19 @@ const view = {
       tokens: { input: 1_000_000, cacheRead: 2_000_000, cacheWrite: 100_000, output: 500_000, reasoning: 0 },
       peak: { calls: 2, micros: 9_000_000, tokens: { input: 800_000, cacheRead: 1_500_000, cacheWrite: 100_000, output: 300_000, reasoning: 0 } },
       offPeak: { calls: 1, micros: 3_345_678, tokens: { input: 200_000, cacheRead: 500_000, cacheWrite: 0, output: 200_000, reasoning: 0 } },
+      epochs: [
+        { effectiveFrom: 1792000000000, effectiveTo: 1792380000000, version: 'config', currency: 'CNY', symbol: '¥', rateBasis: 'exact', calls: 1, tokens: { input: 400_000, cacheRead: 900_000, cacheWrite: 0, output: 200_000, reasoning: 0 }, micros: 9_000_000, savedMicros: 0 },
+        { effectiveFrom: 1792380000000, effectiveTo: null, version: 'official-1', currency: 'CNY', symbol: '¥', rateBasis: 'exact', calls: 2, tokens: { input: 600_000, cacheRead: 1_100_000, cacheWrite: 100_000, output: 300_000, reasoning: 0 }, micros: 3_345_678, savedMicros: 2_000_000 },
+      ],
     },
   ],
   pricing: {
     version: 'official-1',
-    source: 'https://api-docs.deepseek.com/quick_start/pricing',
+    source: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing',
     effectiveFrom: 1792380000000,
     fetchedAt: 1792380000000,
-    currency: 'USD',
-    symbol: '$',
+    currency: 'CNY',
+    symbol: '¥',
     exchangeRate: 1,
     peakWindows: [[60, 240], [360, 600]],
     weekdaysOnly: true,
@@ -144,8 +150,60 @@ const view = {
     reasoningBilling: 'included',
     holidays: [],
     holidaysSource: 'auto',
+    holidayProvenance: { auto: [], manual: [], fixed: [] },
+    parserVersion: 1,
+    pageVariant: 'zh',
     autoRefresh: { pricing: true, holidays: true },
     holidayOffsetMinutes: 480,
+    // Two rate segments: the timeline is what lets a session span a price change.
+    epochs: [
+      {
+        version: 'config',
+        effectiveFrom: 1792000000000,
+        effectiveTo: 1792380000000,
+        fetchedAt: null,
+        currency: 'CNY',
+        symbol: '¥',
+        source: 'config',
+        pageVariant: null,
+        rates: { 'deepseek-flash': { input: 4, cacheRead: 0.08, cacheWrite: 4, output: 16 } },
+      },
+      {
+        version: 'official-1',
+        effectiveFrom: 1792380000000,
+        effectiveTo: null,
+        fetchedAt: 1792380000000,
+        currency: 'CNY',
+        symbol: '¥',
+        source: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing',
+        pageVariant: 'zh',
+        rates: { 'deepseek-flash': { input: 2, cacheRead: 0.04, cacheWrite: 2, output: 8 } },
+      },
+    ],
+  },
+  // Live Host state (not frozen): freshness and degradation of the two sources.
+  status: {
+    catalogVersion: 'official-1',
+    pricing: {
+      fetchedAt: 1792380000000,
+      attemptedAt: 1792380003600000,
+      parserVersion: 1,
+      source: 'https://api-docs.deepseek.com/quick_start/pricing',
+      degraded: false,
+      degradedReason: null,
+      stale: false,
+      refreshIntervalMs: 21_600_000,
+    },
+    holidays: {
+      fetchedAt: 1792380000000,
+      attemptedAt: 1792380000000,
+      source: 'https://timor.tech/api/holiday/year/{year}',
+      error: null,
+      stale: false,
+      consecutiveFailures: 0,
+      nextRetryAt: 1792466400000,
+      refreshIntervalMs: 86_400_000,
+    },
   },
 }
 
@@ -172,6 +230,27 @@ function render(componentView, translate = t) {
   return texts(tree).join(' | ')
 }
 
+/** The rendered element tree (the stub `useState` forces the dialog open). */
+function renderTree(componentView, translate = t) {
+  return registration.Component({ useProjection: () => componentView, t: translate })
+}
+
+/** Every `className` token in a rendered tree, resolving function components. */
+function classNames(node, out = []) {
+  if (node === null || node === undefined || typeof node !== 'object') return out
+  if (Array.isArray(node)) {
+    for (const child of node) classNames(child, out)
+    return out
+  }
+  if (typeof node.type === 'function') {
+    classNames(node.type(node.props), out)
+    return out
+  }
+  if (node.props && typeof node.props.className === 'string') for (const name of node.props.className.split(/\s+/)) out.push(name)
+  if (node.props && Array.isArray(node.props.children)) for (const child of node.props.children) classNames(child, out)
+  return out
+}
+
 // Empty session: no pill.
 assert.equal(render(undefined), '')
 assert.equal(render({ ...view, calls: 0 }), '')
@@ -179,7 +258,30 @@ assert.equal(render({ ...view, calls: 0 }), '')
 // Populated session: pill + open dialog render with the money, band, windows,
 // pricing source and holiday warning.
 const output = render(view)
-for (const expected of ['$12.35', '高峰费用', '低谷费用', '低谷已节省', '未缓存输入', '缓存命中', '缓存写入', '输出', 'deepseek-flash', '按模型', 'Token 费用', '高峰窗口', '判定基准', '官方价目表', '节假日日历']) {
+for (const expected of [
+  '¥12.35',
+  '高峰费用',
+  '低谷费用',
+  '低谷已节省',
+  '未缓存输入',
+  '缓存命中',
+  '缓存写入',
+  '输出',
+  'deepseek-flash',
+  '按模型',
+  'Token 费用',
+  '高峰窗口',
+  '判定基准',
+  '官方价目表',
+  '节假日日历',
+  '本会话最早的一段费率生效于',
+  '当前最新费率读取于',
+  '费率按请求发生时间取当时有效的价格',
+  '费率时间线：2 段',
+  '未缓存 ¥4/M',
+  '未缓存 ¥2/M',
+  '2 个费率时段',
+]) {
   assert.ok(output.includes(expected), `rendered output should include ${expected}: ${output}`)
 }
 // The dialog renders the UTC windows in the system time zone, keeps the UTC
@@ -194,7 +296,7 @@ for (const expected of ['$12.35', '高峰费用', '低谷费用', '低谷已节�
   assert.ok(output.includes(localWindows), `rendered output should include local windows ${localWindows}: ${output}`)
   assert.ok(output.includes(zone), `rendered output should name the system zone ${zone}: ${output}`)
 }
-assert.ok(output.includes('本会话创建时未获取'), 'an empty frozen calendar explains that it predates the fetch')
+assert.ok(output.includes('尚未获取'), 'an empty calendar explains that it has not been fetched yet')
 assert.ok(!output.includes('{'), `no unresolved placeholders in rendered text: ${output}`)
 
 const tEn = (key, params = {}) => {
@@ -207,17 +309,79 @@ for (const expected of ['Token cost', 'Peak spend', 'Off-peak spend', 'Saved off
 }
 assert.ok(!english.includes('{'), `no unresolved placeholders in the English render: ${english}`)
 
-// A configured holiday list removes the warning and reports an automatic count.
-const holidayView = { ...view, pricing: { ...view.pricing, holidays: ['2026-10-19'], holidaysSource: 'auto' } }
+// A configured holiday list removes the missing-calendar warning and reports
+// per-source provenance (auto / manual / fixed anchors).
+const holidayView = {
+  ...view,
+  pricing: { ...view.pricing, holidays: ['2026-10-19'], holidaysSource: 'auto', holidayProvenance: { auto: ['2026-10-19'], manual: [], fixed: [] } },
+}
 const holidayOutput = render(holidayView)
 assert.ok(!holidayOutput.includes('未配置节假日'), 'no holiday warning once a calendar is configured')
-assert.ok(holidayOutput.includes('自动获取 1 天'), 'an automatic calendar reports its size')
+assert.ok(holidayOutput.includes('自动 1 天'), `a provenance calendar reports its automatic size: ${holidayOutput}`)
+assert.ok(holidayOutput.includes('手动 0 天'), 'the provenance line reports the manual count')
+assert.ok(holidayOutput.includes('固定锚点 0 天'), 'the provenance line reports the fixed-anchor count')
+
+// Fixed anchors become visible once the canonical module supplies them.
+const fixedView = { ...view, pricing: { ...view.pricing, holidays: ['2027-01-01', '2026-10-19'], holidaysSource: 'auto', holidayProvenance: { auto: ['2026-10-19'], manual: [], fixed: ['2027-01-01'] } } }
+assert.ok(render(fixedView).includes('固定锚点 1 天'), 'fixed anchors are counted when present')
+
+// An older snapshot without provenance still reports the legacy source label.
+const legacyHolidayPricing = { ...view.pricing, holidays: ['2026-10-19'], holidaysSource: 'auto' }
+delete legacyHolidayPricing.holidayProvenance
+assert.ok(render({ ...view, pricing: legacyHolidayPricing }).includes('自动获取 1 天'), 'a snapshot without provenance keeps the legacy automatic count')
 
 // Local-only catalog reports the fallback source.
 const localView = { ...view, pricing: { ...view.pricing, source: 'config', version: 'config' } }
 const localOutput = render(localView)
 assert.ok(localOutput.includes('本地后备费率'), 'a config card is labeled as fallback')
-assert.ok(localOutput.includes('尚未获取官方价目表'), 'a bootstrap card explains that it predates the fetch')
+assert.ok(localOutput.includes('尚未成功读取官方价目表'), 'a bootstrap card explains that the official page has not been read')
+
+// --- data-trust warnings: stale/degraded pricing and holiday state ---------
+{
+  assert.ok(!classNames(renderTree(view)).includes('dsh-tc-pillWarn'), 'a healthy status shows no pill warning dot')
+  assert.ok(!classNames(renderTree(view)).includes('dsh-tc-badge'), 'a healthy hint shows no stale/degraded badge')
+  assert.ok(!output.includes('陈旧'), `a healthy hint does not claim staleness: ${output}`)
+
+  const stalePricing = { ...view, status: { ...view.status, pricing: { ...view.status.pricing, stale: true } } }
+  const staleOutput = render(stalePricing)
+  assert.ok(classNames(renderTree(stalePricing)).includes('dsh-tc-pillWarn'), 'a stale rate source shows the pill warning dot')
+  assert.ok(classNames(renderTree(stalePricing)).includes('dsh-tc-badge'), 'a stale rate source shows a hint badge')
+  assert.match(staleOutput, /费率数据已陈旧/, 'the hint explains that rate data is stale')
+
+  const degradedPricing = { ...view, status: { ...view.status, pricing: { ...view.status.pricing, degraded: true, degradedReason: 'HTTP 503', stale: true } } }
+  const degradedOutput = render(degradedPricing)
+  assert.ok(classNames(renderTree(degradedPricing)).includes('dsh-tc-pillWarn'), 'a degraded rate source shows the pill warning dot')
+  assert.match(degradedOutput, /费率抓取异常：HTTP 503/, 'the hint shows the degraded reason')
+  assert.match(degradedOutput, /降级/, 'the hint badge says degraded')
+
+  const failedHolidays = {
+    ...view,
+    status: {
+      ...view.status,
+      holidays: { ...view.status.holidays, error: 'ETIMEDOUT 2026', consecutiveFailures: 2, nextRetryAt: view.status.holidays.fetchedAt + 900_000, stale: true },
+    },
+  }
+  const failedOutput = render(failedHolidays)
+  assert.ok(classNames(renderTree(failedHolidays)).includes('dsh-tc-pillWarn'), 'a failing holiday source shows the pill warning dot')
+  assert.match(failedOutput, /节假日获取失败：ETIMEDOUT 2026/, 'the hint shows the holiday failure reason')
+  assert.match(failedOutput, /下次重试/, 'the hint shows the retry time')
+
+  const staleHolidays = { ...view, status: { ...view.status, holidays: { ...view.status.holidays, fetchedAt: 1, stale: true } } }
+  assert.ok(classNames(renderTree(staleHolidays)).includes('dsh-tc-pillWarn'), 'a stale holiday calendar shows the pill warning dot')
+  assert.match(render(staleHolidays), /节假日日历已陈旧/, 'the hint labels a stale holiday calendar')
+
+  // A Host without a web service has no live status: no warning, no status lines.
+  const offlineView = { ...view, status: null }
+  const offlineOutput = render(offlineView)
+  assert.ok(!classNames(renderTree(offlineView)).includes('dsh-tc-pillWarn'), 'no status means no warning dot')
+  assert.ok(!offlineOutput.includes('当前最新费率读取于'), 'no live rate line without a host status')
+
+  // Every new string also renders in English without unresolved placeholders.
+  const degradedEnglish = render(degradedPricing, tEn)
+  assert.match(degradedEnglish, /Rate refresh failed: HTTP 503/)
+  assert.match(degradedEnglish, /degraded/)
+  assert.ok(!degradedEnglish.includes('{'), `no unresolved placeholders in the degraded English render: ${degradedEnglish}`)
+}
 
 console.log('client tests: all assertions passed')
 console.log(`rendered: ${output.slice(0, 280)}…`)

@@ -1,18 +1,23 @@
 # Token cost plugin bundle.
 #
-# Rates and peak hours are fetched from the official DeepSeek pricing page and
-# frozen per conversation at its creation time: a rate change prices new
-# conversations under the new rules and never rewrites an existing one.
+# Rates and peak hours are fetched from the official DeepSeek pricing page, and
+# every request is priced by the rate that was in force when it started: a price
+# change splits the timeline instead of repricing history or freezing the whole
+# conversation on one card.
 #
 # The `rates` block below is only the fallback used when the catalog cannot be
 # fetched (or `pricingSource: false`). Values are peak rates in the catalog
-# currency per 1,000,000 tokens; off-peak applies `offPeakMultiplier`.
+# currency (CNY, mirroring the zh-CN page) per 1,000,000 tokens; off-peak applies
+# `offPeakMultiplier`.
 - insert:
     - id: token-cost
       name: '@local/dsh-token-cost'
       config:
-        # Official machine-readable price page. Set false to stay offline.
-        pricingSource: https://api-docs.deepseek.com/quick_start/pricing
+        # Official machine-readable price page, denominated in CNY. Point this at
+        # https://api-docs.deepseek.com/quick_start/pricing for the USD copy;
+        # the parser reads either and records which one it used. Set false to
+        # stay offline.
+        pricingSource: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
         refreshIntervalMs: 21600000
         fetchTimeoutMs: 15000
         # Chinese public-holiday calendar: {year} is replaced with the year.
@@ -27,8 +32,10 @@
         # Optional policy overrides; omitted means use the catalog's windows.
         # peakWindows: [[60, 240], [360, 600]]
         # weekdaysOnly: true
-        # Display currency. Empty = use the catalog currency (USD).
-        # Set e.g. CNY / ¥ / 7.2 to display a converted amount.
+        # Display currency. Empty = use the catalog currency (CNY from the zh-CN
+        # page, USD from the English one). `exchangeRate` multiplies the card's
+        # own rates, so leave it at 1 unless you deliberately want converted
+        # amounts.
         currency: ''
         symbol: ''
         exchangeRate: 1
@@ -38,20 +45,20 @@
         reasoningBilling: included
         rates:
           deepseek-flash:
-            input: 0.3
-            cacheRead: 0.006
-            cacheWrite: 0.3
-            output: 1.2
+            input: 2
+            cacheRead: 0.04
+            cacheWrite: 2
+            output: 8
             offPeakMultiplier: 0.5
           deepseek-v4-pro:
-            input: 1.32
-            cacheRead: 0.044
-            cacheWrite: 1.32
-            output: 3.96
+            input: 9
+            cacheRead: 0.3
+            cacheWrite: 9
+            output: 27
             offPeakMultiplier: 0.5
           default:
-            input: 0.3
-            cacheRead: 0.006
-            cacheWrite: 0.3
-            output: 1.2
+            input: 2
+            cacheRead: 0.04
+            cacheWrite: 2
+            output: 8
             offPeakMultiplier: 0.5

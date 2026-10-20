@@ -74,21 +74,23 @@ const SYSTEM_PROMPT_ORDER = 2_500
 export function apply(ctx, rawConfig) {
   const config = resolveConfig(rawConfig)
 
-  let credentials
-  try {
-    credentials = ctx.get('credentials')
-  } catch {
-    credentials = undefined
-  }
+  // Resolve the credential seam per request, never at activation: the Loader
+  // starts plugin rows concurrently, so a service that exists later in the
+  // composition (or is still finishing its own init) is not visible here yet.
+  // Capturing it once would leave the plugin anonymous for its whole lifetime.
+  let warnedNoCredentials = false
   const tokenProvider = async () => {
     if (config.token.length > 0) return config.token
-    if (credentials === undefined) return ''
-    try {
-      const resolved = await credentials.resolve(config.tokenEnv)
-      return typeof resolved?.value === 'string' ? resolved.value : ''
-    } catch {
+    const credentials = ctx.get('credentials')
+    if (credentials === undefined) {
+      if (!warnedNoCredentials) {
+        warnedNoCredentials = true
+        ctx.logger?.warn?.('[dsh-github] no credentials service in this composition; GitHub requests stay anonymous')
+      }
       return ''
     }
+    const resolved = await credentials.resolve(config.tokenEnv)
+    return typeof resolved?.value === 'string' ? resolved.value : ''
   }
 
   const client = createHttpClient(config, { logger: ctx.logger, tokenProvider })
@@ -96,9 +98,10 @@ export function apply(ctx, rawConfig) {
 
   for (const tool of tools) ctx.tools.register(tool)
 
-  const systemPrompt = ctx.get('systemPrompt')
-  if (systemPrompt !== undefined) {
-    systemPrompt.section({
+  // Same activation-order concern as the token: wait for the system-prompt
+  // service instead of skipping the section when it is not up yet.
+  ctx.inject(['systemPrompt'], (injected) => {
+    injected.systemPrompt.section({
       name: 'tool:github',
       order: SYSTEM_PROMPT_ORDER,
       text: ({ scope }) =>
@@ -117,7 +120,7 @@ export function apply(ctx, rawConfig) {
               'Cite issue, pull request, commit, and file URLs as markdown links in your answer.',
             ].join(' '),
     })
-  }
+  })
 
   ctx.logger?.info?.(
     `[dsh-github] registered ${tools.length} tools (${config.hasToken ? `token via ${config.tokenSource}` : 'credentials resolved per request'}, writes ${config.allowWrites ? 'enabled' : 'disabled'})`,

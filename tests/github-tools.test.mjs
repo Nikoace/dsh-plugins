@@ -147,9 +147,20 @@ function routerOf(table) {
 /** Cordis-like context: captures registrations and serves named services. */
 function fakeCtx({ approval, services = {}, logger } = {}) {
   const registered = []
-  return {
+  const injections = []
+  /** Run one queued `inject` callback once every dependency is provided. */
+  const runInjection = (entry) => {
+    if (entry.done || !entry.deps.every((name) => services[name] !== undefined)) return
+    entry.done = true
+    const injected = { get: (name) => ctx.get(name), dispose() {} }
+    for (const name of entry.deps) injected[name] = services[name]
+    entry.callback(injected)
+  }
+  const ctx = {
     logger: logger ?? { info() {}, warn() {} },
     registered,
+    services,
+    injections,
     get(name) {
       if (Object.hasOwn(services, name)) return services[name]
       if (name === 'approval') return approval
@@ -160,7 +171,18 @@ function fakeCtx({ approval, services = {}, logger } = {}) {
         registered.push(definition)
       },
     },
+    inject(deps, callback) {
+      const entry = { deps, callback, done: false }
+      injections.push(entry)
+      runInjection(entry)
+      return { dispose() {} }
+    },
+    provide(name, value) {
+      services[name] = value
+      for (const entry of injections) runInjection(entry)
+    },
   }
+  return ctx
 }
 
 /** Approval service stub; records each request. */
@@ -1881,11 +1903,8 @@ await test('clip respects its character budget and code fences outgrow embedded 
 
 await test('apply registers scope-aware system-prompt guidance', () => {
   const sections = []
-  const ctx = {
-    logger: { info() {}, warn() {} },
-    get: (name) => (name === 'systemPrompt' ? { section: (options) => sections.push(options) } : undefined),
-    tools: { register() {}, get: () => ({}) },
-  }
+  const ctx = fakeCtx({ services: { systemPrompt: { section: (options) => sections.push(options) } } })
+  ctx.tools.get = () => ({})
   apply(ctx, {})
   assert.equal(sections.length, 1)
   assert.equal(sections[0].name, 'tool:github')
@@ -1893,9 +1912,9 @@ await test('apply registers scope-aware system-prompt guidance', () => {
   const text = sections[0].text({ scope: undefined })
   includes(text, 'untrusted')
   includes(text, 'github_pull_diff')
-  const hidden = { ...ctx, tools: { register() {}, get: () => undefined } }
   const hiddenSections = []
-  hidden.get = (name) => (name === 'systemPrompt' ? { section: (options) => hiddenSections.push(options) } : undefined)
+  const hidden = fakeCtx({ services: { systemPrompt: { section: (options) => hiddenSections.push(options) } } })
+  hidden.tools.get = () => undefined
   apply(hidden, {})
   assert.equal(hiddenSections[0].text({ scope: undefined }), '', 'the section is empty when no github tool is visible')
 })
@@ -2096,6 +2115,57 @@ await test('apply keeps credential-store reads and live write policy working tog
       else process.env[key] = value
     }
   }
+})
+
+// ---------------------------------------------------------------------------
+// Activation-order resilience: the Loader starts plugin rows concurrently, so
+// optional services may not exist yet when `apply` runs.
+// ---------------------------------------------------------------------------
+
+await test('a credentials service provided after activation is used on the next request', async () => {
+  const originalFetch = globalThis.fetch
+  const savedEnv = { GITHUB_TOKEN: process.env.GITHUB_TOKEN, GH_TOKEN: process.env.GH_TOKEN }
+  const requests = []
+  try {
+    delete process.env.GITHUB_TOKEN
+    delete process.env.GH_TOKEN
+    globalThis.fetch = async (_url, init) => {
+      requests.push(init)
+      return jsonResponse(REPO_FIXTURE)
+    }
+    const ctx = fakeCtx()
+    apply(ctx, {})
+    const harness = { byName: new Map(ctx.registered.map((tool) => [tool.name, tool])) }
+    await callTool(harness, 'github_repo', { repo: REPO })
+    assert.equal(requests.at(-1).headers.Authorization, undefined, 'anonymous while the service is absent')
+    ctx.provide('credentials', {
+      async resolve(ref) {
+        assert.equal(ref, 'GITHUB_TOKEN')
+        return { value: 'late-token', source: 'file' }
+      },
+    })
+    await callTool(harness, 'github_repo', { repo: REPO })
+    assert.equal(requests.at(-1).headers.Authorization, 'Bearer late-token', 'the late service is read per request')
+    assert.equal(requests.length, 2)
+  } finally {
+    globalThis.fetch = originalFetch
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+})
+
+await test('system-prompt guidance registers when the service appears after activation', () => {
+  const sections = []
+  const ctx = fakeCtx()
+  ctx.tools.get = () => ({})
+  apply(ctx, {})
+  assert.equal(sections.length, 0, 'the section waits for the service instead of being skipped')
+  ctx.provide('systemPrompt', { section: (options) => sections.push(options) })
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].name, 'tool:github')
+  includes(sections[0].text({ scope: undefined }), 'github_*')
 })
 
 // ---------------------------------------------------------------------------

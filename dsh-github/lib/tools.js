@@ -3,9 +3,9 @@
  *
  * Read tools are registered unconditionally and work anonymously for public
  * repositories. Write tools are registered too, but their bodies check
- * `allowWrites` and request per-call approval before any request leaves the
- * Host. Every tool declares an object-rooted output value that `render` turns
- * into Markdown.
+ * `allowWrites` and, when `requireApproval` is true, request per-call approval
+ * before any request leaves the Host. Every tool declares an object-rooted
+ * output value that `render` turns into Markdown.
  */
 
 import { hasNextPage } from './http.js'
@@ -136,7 +136,7 @@ export function createGithubTools({ config, client, ctx }) {
     }
     if (approval === undefined) {
       throw new Error(
-        'GitHub writes require approval, but this Harness has no approval service. Set requireApproval: false in the dsh-github config to allow unconfirmed writes.',
+        'GitHub writes require approval, but this Harness has no approval service. No GitHub write request was sent. Restore the Harness approval service and retry, or keep writes disabled (allowWrites: false).',
       )
     }
     if (!exec.agent) throw new Error('GitHub writes require an active agent for the approval request.')
@@ -669,7 +669,7 @@ export function createGithubTools({ config, client, ctx }) {
   tools.push({
     name: 'github_create_issue',
     description:
-      'Create a GitHub issue. Requires allowWrites and per-call approval in the plugin config. Write operation.',
+      'Create a GitHub issue. Requires allowWrites: true; per-call user approval is required when requireApproval: true (the default). With requireApproval: false, writes execute without further confirmation. Write operation.',
     parameters: createIssueParameters,
     output: outputFor(renderMutation, maxOutputChars),
     timeoutMs: config.toolTimeoutMs,
@@ -710,7 +710,7 @@ export function createGithubTools({ config, client, ctx }) {
   tools.push({
     name: 'github_comment',
     description:
-      'Add a comment to a GitHub issue or pull request. Requires allowWrites and per-call approval in the plugin config. Write operation.',
+      'Add a comment to a GitHub issue or pull request. Requires allowWrites: true; per-call user approval is required when requireApproval: true (the default). With requireApproval: false, writes execute without further confirmation. Write operation.',
     parameters: commentParameters,
     output: outputFor(renderMutation, maxOutputChars),
     timeoutMs: config.toolTimeoutMs,
@@ -752,7 +752,7 @@ export function createGithubTools({ config, client, ctx }) {
   tools.push({
     name: 'github_create_pull_request',
     description:
-      'Create a GitHub pull request from an existing branch. Requires allowWrites and per-call approval in the plugin config. Does not push branches. Write operation.',
+      'Create a GitHub pull request from an existing branch. Requires allowWrites: true; per-call user approval is required when requireApproval: true (the default). With requireApproval: false, writes execute without further confirmation. Does not push branches. Write operation.',
     parameters: createPullParameters,
     output: outputFor(renderMutation, maxOutputChars),
     timeoutMs: config.toolTimeoutMs,

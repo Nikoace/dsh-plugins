@@ -124,4 +124,99 @@ assert.equal(injected.form, form)
 assert.equal(injected.remote, ctx.remote)
 assert.equal(typeof injected.fallbackT, 'function')
 
-console.log('github-settings client: 1 passed, 0 failed (1 total)')
+assert.match(localeRegistration.dicts.en.hintRequireApproval, /without further confirmation/)
+assert.match(localeRegistration.dicts.en.hintRequireApproval, /real GitHub repository/)
+assert.match(localeRegistration.dicts.zh.hintRequireApproval, /不经再次确认/)
+assert.match(localeRegistration.dicts.zh.hintRequireApproval, /真实 GitHub 仓库/)
+
+// Exercise the actual Settings handlers with persistent hook state and a fake
+// credential store. No real credential or profile is read or written.
+const hooks = []
+let cursor = 0
+let effects = []
+const sameDeps = (left, right) => left && right && left.length === right.length && left.every((value, i) => Object.is(value, right[i]))
+react.useState = (initial) => {
+  const i = cursor++
+  if (!hooks[i]) hooks[i] = { value: typeof initial === 'function' ? initial() : initial }
+  return [hooks[i].value, (next) => { hooks[i].value = typeof next === 'function' ? next(hooks[i].value) : next }]
+}
+react.useCallback = (callback, deps) => {
+  const i = cursor++
+  if (!sameDeps(hooks[i]?.deps, deps)) hooks[i] = { value: callback, deps }
+  return hooks[i].value
+}
+react.useEffect = (effect, deps) => {
+  const i = cursor++
+  if (!sameDeps(hooks[i]?.deps, deps)) {
+    hooks[i] = { deps }
+    effects.push(effect)
+  }
+}
+react.useSyncExternalStore = (_subscribe, read) => read()
+
+let storedToken = ''
+const credentialCalls = []
+const settingsWrites = []
+form.getSnapshot = () => ({ status: 'ready', writable: true, revision: 1, value: { allowWrites: false, requireApproval: true } })
+form.mutate = async (operations) => { settingsWrites.push(operations); return true }
+ctx.remote.credentials = {
+  async describe(refs) {
+    credentialCalls.push(['describe', ...refs])
+    return { ok: true, value: { GITHUB_TOKEN: { configured: storedToken.length > 0, writable: true, source: 'store' } } }
+  },
+  async set(ref, token) {
+    credentialCalls.push(['set', ref])
+    storedToken = token
+    return { ok: true }
+  },
+  async unset(ref) {
+    credentialCalls.push(['unset', ref])
+    storedToken = ''
+    return { ok: true }
+  },
+}
+
+const render = () => {
+  cursor = 0
+  const tree = registration.component(injected)
+  const pending = effects
+  effects = []
+  pending.forEach((effect) => effect())
+  return tree
+}
+const nodes = (tree) => {
+  if (!tree?.args) return []
+  return [tree, ...tree.args.slice(2).flatMap(nodes)]
+}
+const input = (tree) => nodes(tree).find((node) => node.args[0] === 'input' && node.args[1].type === 'password')
+const button = (tree, key) => nodes(tree).find((node) => node.args[0] === 'button' && node.args[2] === `settings.github:${key}`)
+const flush = () => new Promise((resolve) => setImmediate(resolve))
+
+let tree = render()
+await flush()
+tree = render()
+assert.equal(input(tree).args[1].value, '')
+assert.equal(button(tree, 'tokenClear').args[1].disabled, true)
+assert.ok(JSON.stringify(tree).includes('settings.github:hintRequireApproval'), 'the approval hint is rendered')
+input(tree).args[1].onChange({ target: { value: '  test-settings-token  ' } })
+tree = render()
+assert.equal(button(tree, 'tokenSave').args[1].disabled, false)
+button(tree, 'tokenSave').args[1].onClick()
+await flush()
+tree = render()
+assert.equal(storedToken, 'test-settings-token', 'the credential service receives the trimmed token')
+assert.equal(input(tree).args[1].value, '', 'the input is cleared after saving')
+assert.ok(!JSON.stringify(tree).includes('test-settings-token'), 'stored credentials are not echoed')
+assert.equal(button(tree, 'tokenClear').args[1].disabled, false)
+button(tree, 'tokenClear').args[1].onClick()
+await flush()
+tree = render()
+assert.equal(storedToken, '')
+assert.equal(button(tree, 'tokenClear').args[1].disabled, true)
+assert.deepEqual(credentialCalls, [
+  ['describe', 'GITHUB_TOKEN'], ['set', 'GITHUB_TOKEN'], ['describe', 'GITHUB_TOKEN'],
+  ['unset', 'GITHUB_TOKEN'], ['describe', 'GITHUB_TOKEN'],
+])
+assert.equal(settingsWrites.length, 0, 'credential changes do not write tokens or permissions to the settings form')
+
+console.log('github-settings client: 2 passed, 0 failed (2 total)')

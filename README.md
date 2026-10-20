@@ -58,11 +58,12 @@ node tests/client-smoke.mjs                 # renders the client halves in a DOM
 node tests/replay.test.mjs                  # replays a recorded session log
 node tests/github-tools.test.mjs            # GitHub tools: HTTP, rendering, writes, cache, config
 node tests/github-settings-client.test.mjs  # GitHub Settings page: loader artifact + slot wiring
+node tests/github-token-help.test.mjs       # GitHub Settings: token creation links + scope guidance
 ```
 
 The harnesses read SlotCore and the official sidebar from the installed app archive
 (`resources/app.asar`); point them elsewhere with the `DSH_ASAR` environment variable.
-The two GitHub harnesses are dependency-free and use mocked GitHub/settings layers, so they
+The three GitHub harnesses are dependency-free and use mocked GitHub/settings layers, so they
 run without a token or network access.
 
 ## Notes

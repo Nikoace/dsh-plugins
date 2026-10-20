@@ -67,7 +67,7 @@ while the Host serves that entry's volatile form.
 
 | Card | Field | Effect |
 |---|---|---|
-| Access token | password field + Save / Clear | Stored under the `GITHUB_TOKEN` credential reference; the page only sees presence, source, and writability. Never written to the profile patch or rendered back. |
+| Access token | password field + Save / Clear | Stored under the `GITHUB_TOKEN` credential reference; the page only sees presence, source, and writability. Never written to the profile patch or rendered back. The card links to GitHub's fine-grained (recommended) and classic token creation pages and states the minimum permissions and the rate-limit gain. |
 | Workspace and writes | default repository | `defaultRepo`, applied to the next tool call |
 | | detect repo from git origin | `detectRepoFromGit` |
 | | allow writes / require approval | Edit with `allowWrites` and `requireApproval` |
@@ -106,6 +106,12 @@ Resolution order:
 3. a credential stored through Settings → GitHub under the `tokenEnv` reference (default
    `GITHUB_TOKEN`), resolved by the Host per request;
 4. anonymous: public data only, 60 requests/hour.
+
+The Settings card says how to create the token: it links to GitHub's
+[fine-grained token page](https://github.com/settings/personal-access-tokens/new) (recommended)
+and [classic token page](https://github.com/settings/tokens/new), and states the minimum
+permissions and that a token raises the limit from 60 to 5,000 requests/hour. Links open in the
+system browser instead of navigating the app shell.
 
 A row token or an environment variable takes precedence over a token saved from Settings; the
 Settings card says so. Changing `tokenEnv` away from `GITHUB_TOKEN` makes the card's saved
@@ -219,6 +225,10 @@ If none resolves, the tool returns a guidance error instead of guessing.
   `x-cordis.volatile` on exactly the seven editable fields; the Settings client registers into
   `settings.section`. **Visual rendering of the page and the browser-side registration after a page
   refresh remain unverified** because this session has no browser control.
+- **Token-guidance harness**: `node tests/github-token-help.test.mjs` renders the Settings section
+  through a minimal React stub and checks that the token card exposes exactly the two
+  token-creation links (HTTPS, `target="_blank"`, `rel` includes `noreferrer`), that both
+  dictionaries describe the required scopes, and that the guidance never embeds a plain-HTTP URL.
 - **Reloading source edits**: the Host loads a plugin module generation at activation. After
   editing the Host bundle, disable and re-enable it (`plugin_manager set_bundle` false → true) to
   pick up new code. The client half enters the page's boot graph on the next page load; a plain

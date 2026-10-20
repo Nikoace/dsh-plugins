@@ -20,6 +20,10 @@ window.__ModuleLoader__.load({
     const NS = 'settings.github'
     const CREDENTIAL_REF = 'GITHUB_TOKEN'
     const PLUGIN_ID = '@local/dsh-github'
+    const TOKEN_URLS = {
+      fineGrained: 'https://github.com/settings/personal-access-tokens/new',
+      classic: 'https://github.com/settings/tokens/new',
+    }
 
     const zh = {
       nav: 'GitHub',
@@ -52,6 +56,11 @@ window.__ModuleLoader__.load({
       hintMaxOutputChars: '单个工具结果的最大字符数，1 000–400 000。',
       tokenTitle: '访问令牌',
       tokenDescription: '令牌保存在 Host 的凭据存储中，插件只读取而不会回显。推荐使用只读 fine-grained PAT；需要写入时再补充 Issues / Pull requests 写权限。',
+      tokenHelpIntro: '还没有令牌？在 GitHub 创建后粘贴到下方输入框。令牌只保存在本机凭据存储，不会写入 profile，也不会出现在工具结果里。',
+      tokenHelpFineGrained: '创建 fine-grained token（推荐）',
+      tokenHelpClassic: '创建 classic token',
+      tokenHelpScopes: 'fine-grained：Repository access 选 Public repositories (read-only)，Permissions 给 Contents: Read；要读 Issue/PR 再加 Issues 与 Pull requests: Read，写入时改为 Read and write。classic：勾选 public_repo（公开仓库）或 repo（私有仓库）。',
+      tokenHelpRateLimit: '配置令牌后限额从 60 次/小时提升到 5 000 次/小时，并解锁代码搜索、私有仓库与写操作。',
       tokenConfigured: '已配置',
       tokenMissing: '未配置（匿名访问，60 次/小时）',
       tokenSource: '来源：{source}',
@@ -99,6 +108,11 @@ window.__ModuleLoader__.load({
       hintMaxOutputChars: 'Maximum characters in one tool result, 1,000–400,000.',
       tokenTitle: 'Access token',
       tokenDescription: 'The token is stored in the Host credential store; the plugin reads it without echoing it. Prefer a read-only fine-grained PAT, and add Issues / Pull requests write access only when writes are enabled.',
+      tokenHelpIntro: 'No token yet? Create one on GitHub, then paste it into the field below. The token stays in the local credential store; it is never written to the profile or echoed in tool results.',
+      tokenHelpFineGrained: 'Create a fine-grained token (recommended)',
+      tokenHelpClassic: 'Create a classic token',
+      tokenHelpScopes: 'Fine-grained: set Repository access to Public repositories (read-only) and grant Contents: Read; add Issues and Pull requests: Read to read issues and pull requests, or Read and write when writes are enabled. Classic: select public_repo for public repositories or repo for private ones.',
+      tokenHelpRateLimit: 'A token raises the limit from 60 to 5,000 requests/hour and unlocks code search, private repositories, and writes.',
       tokenConfigured: 'Configured',
       tokenMissing: 'Not configured (anonymous, 60 requests/hour)',
       tokenSource: 'Source: {source}',
@@ -138,6 +152,11 @@ window.__ModuleLoader__.load({
 .dsh-gh-card-head { display: flex; flex-direction: column; gap: 4px; }
 .dsh-gh-card-title { margin: 0; font-size: 14px; font-weight: 600; }
 .dsh-gh-hint { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.dsh-gh-help { display: flex; flex-direction: column; gap: 4px; }
+.dsh-gh-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
+.dsh-gh-link { color: var(--dsw-alias-brand-primary); font-size: 12px; text-decoration: none; }
+.dsh-gh-link:hover { text-decoration: underline; }
+.dsh-gh-link:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; border-radius: 2px; }
 .dsh-gh-row { display: flex; gap: 24px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--dsw-alias-border-l1); }
 .dsh-gh-row:first-of-type { border-top: none; padding-top: 0; }
 .dsh-gh-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -360,6 +379,28 @@ window.__ModuleLoader__.load({
         h('p', { className: 'dsh-gh-desc' }, t('description')),
       )
 
+      const tokenHelp = h(
+        'div',
+        { className: 'dsh-gh-help' },
+        h('p', { className: 'dsh-gh-hint' }, t('tokenHelpIntro')),
+        h(
+          'p',
+          { className: 'dsh-gh-links' },
+          h(
+            'a',
+            { className: 'dsh-gh-link', href: TOKEN_URLS.fineGrained, target: '_blank', rel: 'noreferrer noopener' },
+            t('tokenHelpFineGrained'),
+          ),
+          h(
+            'a',
+            { className: 'dsh-gh-link', href: TOKEN_URLS.classic, target: '_blank', rel: 'noreferrer noopener' },
+            t('tokenHelpClassic'),
+          ),
+        ),
+        h('p', { className: 'dsh-gh-hint' }, t('tokenHelpScopes')),
+        h('p', { className: 'dsh-gh-hint' }, t('tokenHelpRateLimit')),
+      )
+
       const tokenCard = h(
         'section',
         { className: 'dsh-gh-card', 'aria-labelledby': 'dsh-gh-token-title' },
@@ -368,6 +409,7 @@ window.__ModuleLoader__.load({
           { className: 'dsh-gh-card-head' },
           h('h3', { className: 'dsh-gh-card-title', id: 'dsh-gh-token-title' }, t('tokenTitle')),
           h('p', { className: 'dsh-gh-hint' }, t('tokenDescription')),
+          tokenHelp,
         ),
         h(
           'div',

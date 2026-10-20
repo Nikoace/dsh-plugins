@@ -7,7 +7,7 @@ and offline test harnesses used to build them.
 |---|---|---|
 | [`dsh-sidebar-clock`](dsh-sidebar-clock/README.md) | 1.0.1 | One card at the top of the sidebar: local clock, live deepseek peak/off-peak band, countdowns to the next weekend and the next Chinese public holiday, and the signed-in account balance. |
 | [`dsh-token-cost`](dsh-token-cost/README.md) | 1.2.0 | Prices the current Session in real time from the official DeepSeek rate card, separating peak/off-peak, cache-hit/cache-miss/cache-write input and output, with a per-request breakdown dialog. |
-| [`dsh-github`](dsh-github/README.md) | 1.1.0 | Adds model-facing GitHub tools (repository search and metadata, issues, pull requests and diffs, commits, files) plus a Settings → GitHub page for the token, default repository, and write policy; writes stay opt-in and approval-gated. |
+| [`dsh-github`](dsh-github/README.md) | 1.1.0 | Adds model-facing GitHub tools (repository search and metadata, issues, pull requests and diffs, commits, files) plus a Settings → GitHub page for the token, default repository, and write policy; writes stay opt-in and approval-gated by default. |
 
 The two UI plugins are additive: they register into official slots (`sidebar.footer.action`,
 `conversation.composer.dock`) and never replace the stock sidebar or composer. `dsh-github` is
@@ -80,7 +80,7 @@ and the non-goals.
 这个仓库包含三个 DeepSeek Harness 插件：侧边栏时钟卡片（时间、峰谷时段、周末与节假日
 倒计时、账户余额）、Token 费用计量（按官方价目实时计费，区分峰谷与缓存桶），以及
 GitHub 集成（在会话中搜索仓库与代码、阅读 Issue/PR/diff/提交/文件，可在设置页配置
-令牌、默认仓库与写入策略，写入经审批新建 Issue、评论和 PR）。`docs/` 下是功能分析与
+令牌、默认仓库与写入策略，写入默认逐次审批，关闭审批后可直接新建 Issue、评论和 PR）。`docs/` 下是功能分析与
 插件开发笔记，`tests/` 是可离线运行的验证脚本。安装方式见上方 *Installation*。
 
 ## License

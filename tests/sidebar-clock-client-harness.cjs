@@ -6,7 +6,15 @@ const path = require('node:path')
 const vm = require('node:vm')
 const assert = require('node:assert/strict')
 const { installedClient } = require('./sidebar-clock-installed.cjs')
-const { read, SlotCore } = installedClient()
+// Missing app.asar is an environment limitation, not a test failure: the helper
+// prints the canonical SKIP line and returns null, so report the local context
+// and exit 0 to keep CI and machines without the DSH desktop green.
+const installed = installedClient()
+if (!installed) {
+  console.log('SKIP: sidebar-clock-client-harness needs the installed DSH shell; nothing to verify')
+  process.exit(0)
+}
+const { read, SlotCore } = installed
 const slots = new SlotCore()
 slots.register({ name: 'root', children: {
   sidebar: { kind: 'single', scope: 'root' },

@@ -1065,13 +1065,16 @@ function cloneEpochs(epochs) {
 
 /**
  * @param {object[]} epochs - the rate timeline at Session init.
+ * @param {string | null} [sessionId] - this Session's id, so a computed view can
+ *   register its own amount for a parent's subtree total.
  * @returns {object} the projection's initial state.
  */
-function initialState(epochs) {
+function initialState(epochs, sessionId = null) {
   const list = Array.isArray(epochs) ? cloneEpochs(epochs) : [epochs]
   return {
     epochs: list,
     pricing: list[list.length - 1],
+    sessionId: typeof sessionId === 'string' ? sessionId : null,
     calls: 0,
     tokens: zeroTokens(),
     peak: emptyBand(),
@@ -1081,6 +1084,8 @@ function initialState(epochs) {
     stepStartedAt: null,
     attemptStartedAt: null,
     last: null,
+    // Session ids this Session delegated to (`subagent/catalog`), in order.
+    children: [],
   }
 }
 
@@ -1312,6 +1317,16 @@ function foldEvent(state, event, epochs) {
         return { ...synced, attemptStartedAt: event.time }
       }
       return { ...synced, attemptStartedAt: event.time, last: null }
+    case 'subagent/catalog': {
+      // Durable, ordered child registration: the parent's own log records the
+      // ids of the Sessions it delegated to, which is what lets the view report
+      // a whole-tree total without loading child sessions during the fold.
+      const childId = event.data?.childId
+      if (typeof childId !== 'string' || childId.length === 0) return synced
+      const children = synced.children ?? []
+      if (children.includes(childId)) return synced
+      return { ...synced, children: [...children, childId] }
+    }
     case 'assistant/message':
     case 'assistant/attempt': {
       const usage = usageOf(event)
@@ -1409,6 +1424,47 @@ function priceModel(entry, pricing) {
 }
 
 /**
+ * Sum a Session's own money plus every descendant Session's, from a lookup table.
+ *
+ * Delegated Sessions are separate Sessions with their own logs, so a parent's
+ * own fold never sees their usage. The table is the Host's cache of each
+ * Session's own wire amount (`own`), keyed by id; it also carries each entry's
+ * own children so a grandchild is reachable without loading anything in the
+ * fold. Missing entries (a child that was never folded in this process, e.g. a
+ * restored history) are counted as absent rather than as zero-cost, so the
+ * caller can report the difference instead of silently under-reporting.
+ *
+ * @param {object} state - fold state (its `children` are the direct children).
+ * @param {(id: string) => {own: number, calls: number, children: string[]} | undefined} lookup - the Host cache reader.
+ * @returns {{ total: number, own: number, children: number, childCount: number, unknown: number, calls: number }} subtree money.
+ */
+function subtreeOf(state, lookup) {
+  const own = 0
+  const direct = Array.isArray(state.children) ? state.children : []
+  const seen = new Set()
+  let descendants = 0
+  let childCount = 0
+  let calls = 0
+  let unknown = 0
+  const stack = direct.map((id) => ({ id, depth: 1 }))
+  while (stack.length > 0) {
+    const { id } = stack.pop()
+    if (seen.has(id)) continue
+    seen.add(id)
+    const entry = typeof lookup === 'function' ? lookup(id) : undefined
+    if (entry === undefined || entry === null) {
+      unknown += 1
+      continue
+    }
+    childCount += 1
+    descendants += Number.isFinite(entry.own) ? entry.own : 0
+    calls += Number.isFinite(entry.calls) ? entry.calls : 0
+    for (const grandchild of Array.isArray(entry.children) ? entry.children : []) stack.push({ id: grandchild })
+  }
+  return { own, children: descendants, childCount, unknown, calls }
+}
+
+/**
  * Project the fold state into the client-visible value.
  *
  * Every request is priced by the epoch that was in force when it started, so a
@@ -1417,13 +1473,19 @@ function priceModel(entry, pricing) {
  * `pricing.epochs` documents the timeline, and each model row carries the
  * per-epoch split so a mixed row can show why it is not `tokens × rate`.
  *
+ * The Session's own amount is `micros`; `subtree` adds the money of every
+ * Session it delegated to, which is what the pill shows, because a task that ran
+ * through sub-agents costs far more than the parent's own requests.
+ *
  * @param {object} state - fold state.
  * @param {object | null} [status] - live Host state (freshness, degradation). It is
  *   deliberately **not** part of the billed facts: the epochs say what this
  *   session is priced with, `status` says how current the Host's data is.
+ * @param {(id: string) => object | undefined} [lookup] - Host cache of other
+ *   Sessions' own amounts, used for the subtree total.
  * @returns {object} the `tokenCost` wire value.
  */
-function viewOf(state, status = null) {
+function viewOf(state, status = null, lookup = undefined) {
   const epochs = Array.isArray(state.epochs) && state.epochs.length > 0 ? state.epochs : [state.pricing]
   const current = state.pricing ?? epochs[epochs.length - 1]
 
@@ -1546,6 +1608,10 @@ function viewOf(state, status = null) {
   // would need FX, which is not something this plugin can invent, so the
   // current epoch's currency labels the total and `currencyMixed` says so.
   const currencies = new Set(epochs.filter((epoch) => epoch.currency).map((epoch) => epoch.currency))
+  // Delegated Sessions bill separately, so the parent's own fold cannot see
+  // them. `subtree` adds what the Host cache knows about them; `unknownCount`
+  // says how many children had no cached amount (so the total is a lower bound).
+  const subtree = subtreeOf(state, lookup)
   return {
     currency: current.currency,
     symbol: current.symbol,
@@ -1560,6 +1626,14 @@ function viewOf(state, status = null) {
     peakMicros,
     offPeakMicros,
     savedMicros,
+    subtree: {
+      micros: micros + subtree.children,
+      ownMicros: micros,
+      childrenMicros: subtree.children,
+      childCount: subtree.childCount,
+      unknownCount: subtree.unknown,
+      calls: billedCalls + subtree.calls,
+    },
     tokens,
     bucketMicros,
     peak: { calls: peakCalls, micros: peakMicros, tokens: peakTokens },
@@ -2002,20 +2076,78 @@ export function apply(ctx, config) {
     return latest !== undefined && typeof latest.version === 'string' ? latest.version : 'config'
   }
 
+  /**
+   * Own amount per Session, for the subtree total.
+   *
+   * A parent can never see a delegated Session's usage in its own fold, so the
+   * Host keeps each Session's own wire amount here and the parent's view adds
+   * them up. Entries are written whenever a Session's `tokenCost` changes and
+   * are read synchronously in `view`, which is why this is a plain map rather
+   * than an await: `view` must stay synchronous.
+   *
+   * The map is display-only. It is never persisted, and a miss (a child from a
+   * previous process, or one that has not folded yet) is reported as
+   * `subtree.unknownCount` instead of being treated as free.
+   */
+  const ownAmounts = new Map()
+  const rememberOwn = (sessionId, view) => {
+    if (typeof sessionId !== 'string' || view === null || view === undefined || typeof view !== 'object') return
+    const children = Array.isArray(view.children) ? view.children : []
+    const entry = {
+      own: Number.isFinite(view.micros) ? view.micros : 0,
+      calls: Number.isFinite(view.calls) ? view.calls : 0,
+      children,
+    }
+    const previous = ownAmounts.get(sessionId)
+    // Idempotent: a view read must not churn the cache (or the change feed).
+    if (previous !== undefined && previous.own === entry.own && previous.calls === entry.calls && previous.children.length === children.length && previous.children.every((id, index) => id === children[index])) return
+    ownAmounts.set(sessionId, entry)
+  }
+  live.ownAmounts = ownAmounts
+
   ctx.sessionProjections.register({
     key: 'tokenCost',
     stateVersion: STATE_VERSION,
     stateSchema: passthroughSchema,
     // A Session opens with the timeline known now; later fetches are merged by
     // `foldEvent`, so a price change only affects requests after it arrived.
-    init: (header) => initialState(catalog.epochsFor(header?.createdAt)),
+    init: (header) => initialState(catalog.epochsFor(header?.createdAt), header?.id ?? null),
     apply: (state, event) => foldEvent(state, event, catalogEpochs()),
     wire: {
       viewSchema: passthroughSchema,
-      view: (state) =>
-        viewOf(syncEpochs(state, catalogEpochs()), live.controller === null ? null : { ...live.controller.status(), catalogVersion: catalogVersionLabel() }),
+      view: (state) => {
+        const value = viewOf(
+          syncEpochs(state, catalogEpochs()),
+          live.controller === null ? null : { ...live.controller.status(), catalogVersion: catalogVersionLabel() },
+          (id) => ownAmounts.get(id),
+        )
+        // `state.children` is what a parent reports; keep it on the wire so the
+        // cache updater can record the delegation edges without a second fold.
+        const children = Array.isArray(state.children) ? [...state.children] : []
+        // Opportunistically seed this Session's own entry: a Session whose
+        // change feed never fired for this process (a restored history) would
+        // otherwise be an unknown child in its parent's subtree total. Only a
+        // changed entry writes, so the view stays idempotent.
+        rememberOwn(state.sessionId, { micros: value.micros, calls: value.calls, children })
+        return { ...value, children }
+      },
     },
   })
+
+  // Keep the per-Session amount cache current: every committed `tokenCost`
+  // change refreshes that Session's entry, so a parent's subtree total follows
+  // its children without the parent's own log changing. Optional: a Host
+  // composition without the change feed (or a test double) still works, and
+  // then the cache is seeded lazily by `view` reads instead.
+  ctx.effect(() => {
+    const projections = ctx.sessionProjections
+    if (typeof projections?.onChanged !== 'function') return undefined
+    return projections.onChanged((session, key, value) => {
+      if (key !== 'tokenCost') return
+      const sessionId = session !== null && typeof session === 'object' && session.id !== undefined ? String(session.id) : null
+      rememberOwn(sessionId, value)
+    })
+  }, 'token-cost: subtree amounts')
 
   ctx.effect(() => {
     const web = ctx.get('web')
@@ -2071,6 +2203,7 @@ export const internals = {
   bandOf,
   epochAt,
   syncEpochs,
+  subtreeOf,
   fixedHolidayDateKeys,
   priceTokens,
   priceModel,

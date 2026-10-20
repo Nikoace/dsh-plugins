@@ -21,6 +21,11 @@ A DSH Web UI plugin that prices the **current Session's** model usage in real ti
 - **Rate timeline** — each request is priced by the rate **in force when it started**. A price
   change splits the timeline instead of freezing a whole conversation on one card, so history stays
   reproducible and a long conversation still tracks today's price.
+- **Sub-agents** — the pill shows the **whole delegated tree**, because a task that ran through
+  sub-agents costs far more than the parent's own requests (in this repo's own logs, one session
+  spent ¥2.75 on itself and ¥2.94 on three sub-agents). The dialog keeps the split:
+  `含子会话 ¥5.68（自身 ¥2.75 + 3 个子 agent ¥2.94）`. A child whose amount is not known yet is
+  disclosed (`另 N 个子会话未取到金额`) rather than counted as free.
 - **Discount visibility** — the dialog shows off-peak spend and the amount the off-peak window saved.
 
 ## Where the numbers come from
@@ -298,4 +303,11 @@ quote**; the fetched catalog is authoritative while it is reachable.
 - **Fixed interpretation.** Peak windows are UTC and the holiday date uses a fixed offset; DST
   regions other than China's holiday calendar are not modeled. A window whose zone the page does not
   state is rejected rather than guessed.
-- **Per Session.** There is no cross-session daily aggregate in this version.
+- **Sub-session totals come from a Host cache.** A delegated Session is a separate Session with its
+  own log, so a parent's fold can never see its usage. The Host keeps each Session's own amount in a
+  display-only map (never persisted) and the parent's `subtree` adds the children recorded in its own
+  `subagent/catalog` events. A child that has not been folded in this process (a restored history
+  from a previous run) is reported as `subtree.unknownCount` and left out of the default total, so the
+  number is a lower bound rather than a silent under-report.
+- **Per Session.** There is no cross-session daily aggregate in this version (only the delegated tree
+  under one Session).

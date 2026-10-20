@@ -15,6 +15,7 @@ const {
   viewOf,
   foldEvent,
   syncEpochs,
+  subtreeOf,
   fixedHolidayDateKeys,
   initialState,
   DEFAULT_RATE_CARD,
@@ -349,13 +350,110 @@ assert.equal(scaledPrice.micros, bucketSum(scaledPrice.buckets))
   assert.equal(estimatedView.micros, 2_000_000, 'default card prices the estimated call')
 }
 
-// --- per-model route pricing ----------------------------------------------
+// --- subtree total: a parent's pill includes its sub-agents ---------------
 {
   const def = unit({ pricingSource: false })
-  const state = fold(def, [header(0, 'deepseek-account', 'deepseek-v4-pro'), stepStart(NOW), assistant({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, { seq: 2 })], 0)
-  const view = def.wire.view(state)
-  assert.equal(view.models[0].model, 'deepseek-v4-pro')
-  assert.equal(view.micros, 36_000_000, 'v4-pro peak: 9 + 27 CNY')
+  const childA = 'session-child-a'
+  const childB = 'session-child-b'
+  const grandchild = 'session-grandchild'
+  const events = [
+    header(0),
+    // The parent records its delegation targets in its own log.
+    { type: 'subagent/catalog', seq: 1, time: NOW, data: { version: 0, mode: 'continuable', label: 'a', childId: childA, childCreatedAt: NOW } },
+    { type: 'subagent/catalog', seq: 2, time: NOW, data: { version: 0, mode: 'continuable', label: 'b', childId: childB, childCreatedAt: NOW } },
+    { type: 'subagent/catalog', seq: 3, time: NOW, data: { version: 0, mode: 'continuable', label: 'b again', childId: childB, childCreatedAt: NOW } },
+    stepStart(NOW),
+    assistant({ inputTokens: 1_000_000, outputTokens: 0 }, { seq: 5 }),
+  ]
+  const state = fold(def, events, 0)
+  assert.deepEqual(state.children, [childA, childB], 'child ids are deduped and kept in order')
+
+  // Without a cache the children are unknown, never free.
+  const bare = def.wire.view(state)
+  assert.equal(bare.micros, 2_000_000, 'the own amount stays the parent\'s own')
+  assert.equal(bare.subtree.ownMicros, 2_000_000)
+  assert.equal(bare.subtree.childrenMicros, 0)
+  assert.equal(bare.subtree.childCount, 0)
+  assert.equal(bare.subtree.unknownCount, 2, 'two children with no cached amount are reported as unknown')
+  assert.equal(bare.subtree.micros, 2_000_000, 'an unknown child is not silently counted as zero-cost')
+
+  // A Host cache with the children's amounts makes the subtree total real.
+  const cache = new Map([
+    [childA, { own: 3_000_000, calls: 2, children: [] }],
+    [childB, { own: 4_000_000, calls: 3, children: [grandchild] }],
+    [grandchild, { own: 1_000_000, calls: 1, children: [] }],
+  ])
+  const withTree = viewOf(state, null, (id) => cache.get(id))
+  assert.equal(withTree.subtree.ownMicros, 2_000_000)
+  assert.equal(withTree.subtree.childrenMicros, 8_000_000, 'children plus grandchildren')
+  assert.equal(withTree.subtree.micros, 10_000_000, 'own + the whole delegated tree')
+  assert.equal(withTree.subtree.childCount, 3, 'every reachable descendant is counted once')
+  assert.equal(withTree.subtree.unknownCount, 0)
+  assert.equal(withTree.subtree.calls, 7, 'tool calls across the tree are additive')
+  assert.equal(withTree.micros, 2_000_000, 'the plain own total is unchanged')
+
+  // A cycle cannot loop forever.
+  const cyclic = new Map([
+    [childA, { own: 1_000_000, calls: 1, children: [childB] }],
+    [childB, { own: 1_000_000, calls: 1, children: [childA] }],
+  ])
+  assert.equal(viewOf(state, null, (id) => cyclic.get(id)).subtree.micros, 4_000_000, 'a cyclic catalog is visited once per Session')
+}
+
+// --- the Host cache records each Session's own amount ---------------------
+{
+  let definition
+  let changeListener
+  const ctx = {
+    sessionProjections: {
+      register: (value) => ((definition = value), () => {}),
+      onChanged: (listener) => ((changeListener = listener), () => {}),
+    },
+    effect: (callback) => callback(),
+    get: () => undefined,
+    logger: {},
+  }
+  apply(ctx, { pricingSource: false })
+  assert.equal(typeof changeListener, 'function', 'apply() subscribes to the projection change feed')
+
+  const parentHeader = { createdAt: NOW, id: 'session-parent' }
+  const childHeader = { createdAt: NOW, id: 'session-child' }
+  const childState = fold(definition, [
+    header(),
+    stepStart(NOW),
+    assistant({ inputTokens: 1_000_000, outputTokens: 0 }, { seq: 2 }),
+  ], NOW)
+  const childView = { ...definition.wire.view(childState) }
+  changeListener({ id: 'session-child' }, 'tokenCost', childView, 1)
+
+  const parentState = fold(definition, [
+    { type: 'subagent/catalog', seq: 0, time: NOW, data: { version: 0, mode: 'continuable', label: 'c', childId: 'session-child', childCreatedAt: NOW } },
+    header(),
+    stepStart(NOW),
+    assistant({ inputTokens: 1_000_000, outputTokens: 0 }, { seq: 3 }),
+  ], NOW)
+  const parentView = definition.wire.view({ ...parentState, sessionId: 'session-parent' })
+  assert.equal(parentView.micros, 2_000_000)
+  assert.equal(parentView.subtree.childrenMicros, 2_000_000, 'the parent reads the child amount from the Host cache')
+  assert.equal(parentView.subtree.micros, 4_000_000, 'the pill total covers the child')
+  assert.equal(parentView.subtree.childCount, 1)
+
+  // A fork/restore where the child never fired a change: its own view read
+  // seeds the cache, so the parent is no longer short by that amount.
+  const orphanState = fold(definition, [
+    header(),
+    stepStart(NOW),
+    assistant({ inputTokens: 500_000, outputTokens: 0 }, { seq: 2 }),
+  ], NOW)
+  definition.wire.view({ ...orphanState, sessionId: 'session-late' })
+  const lateParent = fold(definition, [
+    { type: 'subagent/catalog', seq: 0, time: NOW, data: { version: 0, mode: 'continuable', label: 'l', childId: 'session-late', childCreatedAt: NOW } },
+  ], NOW)
+  assert.equal(
+    definition.wire.view({ ...lateParent, sessionId: 'session-parent-2' }).subtree.childrenMicros,
+    1_000_000,
+    'a Session that only ever had its view read still contributes to its parent',
+  )
 }
 
 // --- excluded gateway routes are out of scope, never $0 -------------------

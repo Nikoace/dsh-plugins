@@ -27,6 +27,11 @@ publishable package.
   `calls` / `tokens` / the amount, and labelled in the dialog, so a gateway that is billed elsewhere
   can no longer be priced from the DeepSeek card (and can no longer be silently folded into a total).
 - `tests/fixtures/pricing-page-zh.html`: contract fixture for the zh-CN price table.
+- `dsh-token-cost`: **sub-agent totals**. The fold records the `subagent/catalog` child ids, the Host
+  keeps each Session's own amount in a display-only cache, and the wire value gained
+  `subtree = { micros, ownMicros, childrenMicros, childCount, unknownCount, calls }`. The pill shows
+  the whole delegated tree; the dialog adds `含子会话 ¥5.68（自身 ¥2.75 + 3 个子 agent ¥2.94）` and
+  discloses children whose amount is not known yet instead of counting them as free.
 
 ### Fixed
 

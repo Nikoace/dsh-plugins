@@ -118,6 +118,9 @@ const view = {
   bucketMicros: { input: 2_000_000, cacheRead: 400_000, cacheWrite: 200_000, output: 9_745_678, reasoning: 0 },
   peak: { calls: 2, micros: 9_000_000, tokens: { input: 800_000, cacheRead: 1_500_000, cacheWrite: 100_000, output: 300_000, reasoning: 0 } },
   offPeak: { calls: 1, micros: 3_345_678, tokens: { input: 200_000, cacheRead: 500_000, cacheWrite: 0, output: 200_000, reasoning: 0 } },
+  // This session delegated to two children; the pill shows the whole tree while
+  // the dialog keeps the own/children split.
+  subtree: { micros: 20_345_678, ownMicros: 12_345_678, childrenMicros: 8_000_000, childCount: 2, unknownCount: 0, calls: 9 },
   models: [
     {
       provider: 'deepseek-account',
@@ -259,7 +262,10 @@ assert.equal(render({ ...view, calls: 0 }), '')
 // pricing source and holiday warning.
 const output = render(view)
 for (const expected of [
+  '¥20.35',
   '¥12.35',
+  '含子会话',
+  '（自身 ¥12.35 + 2 个子 agent ¥8.00）',
   '高峰费用',
   '低谷费用',
   '低谷已节省',
@@ -283,6 +289,19 @@ for (const expected of [
   '2 个费率时段',
 ]) {
   assert.ok(output.includes(expected), `rendered output should include ${expected}: ${output}`)
+}
+
+// A Session with no children shows only its own total and no subtree row.
+{
+  const solo = render({ ...view, subtree: { micros: 12_345_678, ownMicros: 12_345_678, childrenMicros: 0, childCount: 0, unknownCount: 0, calls: 3 } })
+  assert.ok(!solo.includes('含子会话'), `no subtree row without children: ${solo}`)
+  assert.ok(solo.includes('¥12.35'), 'the solo total is the own amount')
+}
+
+// A child whose amount is not known yet is disclosed, not counted as free.
+{
+  const partial = render({ ...view, subtree: { micros: 12_345_678, ownMicros: 12_345_678, childrenMicros: 0, childCount: 1, unknownCount: 2, calls: 3 } })
+  assert.ok(partial.includes('另 2 个子会话未取到金额'), `unknown children are disclosed: ${partial}`)
 }
 // The dialog renders the UTC windows in the system time zone, keeps the UTC
 // reference, and names the zone.

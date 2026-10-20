@@ -1,42 +1,23 @@
 'use strict'
 // Local verification harness for the sidebar-clock pure helpers.
-// It extracts the pure helper section from client.js (everything between the
-// "Pure time / tariff / calendar helpers" marker and the holiday store marker)
+// It extracts the marked tariff-helper region from client.js (the inlined
+// canonical rules from `tools/sync-shared.mjs` plus the clock's own wrappers)
 // and evaluates it in a sandbox, then exercises the same scenarios the widget
 // renders.
 const fs = require('fs')
 const path = require('path')
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'dsh-sidebar-clock', 'client.js'), 'utf8')
-const startMarker = '    function pad2(value) {'
-const endMarker = '    // -----------------------------------------------------------------------\n    // Holiday calendar store'
+const startMarker = '    // >>> clock:tariff-helpers'
+const endMarker = '    // <<< clock:tariff-helpers'
 const start = source.indexOf(startMarker)
 const end = source.indexOf(endMarker)
 if (start < 0 || end < 0 || end <= start) throw new Error('helper section markers not found')
-const body = source.slice(start, end)
-const paramNames = [
-  'PEAK_WINDOWS', 'WEEKDAYS_ONLY', 'HOLIDAY_OFFSET_MINUTES', 'MINUTE_MS', 'DAY_MS', 'FIXED_HOLIDAYS',
-]
-const prelude = `${paramNames.map((name) => `const ${name} = __constants.${name};`).join('\n')}`
+const body = source.slice(start + startMarker.length, end)
 const factory = new Function(
-  '__constants',
-  `${prelude}\n${body}\nreturn { pad2, beijingDateKey, utcMinuteOfDay, inWindow, bandAt, nextBandSwitch, nextBandSwitchCached, weekendBoundary, nextHoliday, holidayDatesForYears, clockAt, formatDays, activeLocaleId, dateLine }`,
+  `${body}\nreturn { pad2, beijingDateKey, utcMinuteOfDay, inWindow, bandAt, nextBandSwitch, nextBandSwitchCached, weekendBoundary, nextHoliday, holidayDatesForYears, clockAt, formatDays, activeLocaleId, dateLine }`,
 )
-const lib = factory({
-  PEAK_WINDOWS: [
-    [60, 240],
-    [360, 600],
-  ],
-  WEEKDAYS_ONLY: true,
-  HOLIDAY_OFFSET_MINUTES: 480,
-  MINUTE_MS: 60000,
-  DAY_MS: 86400000,
-  FIXED_HOLIDAYS: [
-    ['01-01', '元旦'],
-    ['05-01', '劳动节'],
-    ['10-01', '国庆节'],
-  ],
-})
+const lib = factory()
 
 // The balance helpers sit outside the pure time section; extract them too so
 // the Account Remote result handling and wallet formatting are covered offline.

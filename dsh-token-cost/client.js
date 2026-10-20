@@ -31,6 +31,7 @@ window.__ModuleLoader__.load({
 
     const zh = {
       'pill.aria': '本次会话 token 费用 {cost}，当前{band}时段',
+      'pill.ariaSubagents': '本次会话及其 {count} 个子 agent 合计 {cost}，当前{band}时段',
       'band.peak': '高峰',
       'band.offPeak': '低谷',
       'band.current': '当前时段：{band}',
@@ -49,6 +50,10 @@ window.__ModuleLoader__.load({
       'band.untilDaysHours': '{days} 天 {hours} 小时',
       'dialog.title': 'Token 费用',
       'total': '总费用',
+      'total.withSubagents': '含子会话',
+      'subtree.value': '{cost}（自身 {own} + {count} 个子 agent {children}）',
+      'subtree.valueUnknown': '{cost}（自身 {own} + {count} 个子 agent {children}，另 {unknown} 个子会话未取到金额）',
+      'subtree.none': '本会话未派生子 agent。',
       'peakCost': '高峰费用',
       'offPeakCost': '低谷费用',
       'band.spend': '{cost} · {tokens} token',
@@ -104,6 +109,7 @@ window.__ModuleLoader__.load({
 
     const en = {
       'pill.aria': 'This session costs {cost}; current band: {band}',
+      'pill.ariaSubagents': 'This session plus its {count} sub-agent(s) costs {cost}; current band: {band}',
       'band.peak': 'Peak',
       'band.offPeak': 'Off-peak',
       'band.current': 'Current band: {band}',
@@ -122,6 +128,10 @@ window.__ModuleLoader__.load({
       'band.untilDaysHours': '{days} d {hours} h',
       'dialog.title': 'Token cost',
       'total': 'Total',
+      'total.withSubagents': 'With sub-agents',
+      'subtree.value': '{cost} (own {own} + {count} sub-agent(s) {children})',
+      'subtree.valueUnknown': '{cost} (own {own} + {count} sub-agent(s) {children}; {unknown} sub-session(s) have no amount yet)',
+      'subtree.none': 'This session delegated to no sub-agents.',
       'peakCost': 'Peak spend',
       'offPeakCost': 'Off-peak spend',
       'band.spend': '{cost} · {tokens} tokens',
@@ -893,6 +903,31 @@ window.__ModuleLoader__.load({
       const untilText = duration === null ? null : switchAt === null ? t('band.until', { duration }) : t('band.untilAt', { duration, time: switchAt })
       const symbol = view.symbol
       const modelRows = Array.isArray(view.models) ? view.models : []
+      // A task that ran through sub-agents costs far more than this Session's
+      // own requests, so the headline is the whole tree; the breakdown keeps the
+      // own/children split visible.
+      const subtree = view.subtree ?? null
+      const ownMicros = typeof subtree?.ownMicros === 'number' ? subtree.ownMicros : view.micros
+      const headlineMicros = typeof subtree?.micros === 'number' ? subtree.micros : view.micros
+      const childCount = typeof subtree?.childCount === 'number' ? subtree.childCount : 0
+      const unknownChildren = typeof subtree?.unknownCount === 'number' ? subtree.unknownCount : 0
+      const subtreeText =
+        subtree === null || childCount === 0
+          ? null
+          : unknownChildren > 0
+            ? t('subtree.valueUnknown', {
+                cost: formatMoney(headlineMicros, symbol),
+                own: formatMoney(ownMicros, symbol),
+                count: childCount,
+                children: formatMoney(subtree.childrenMicros, symbol),
+                unknown: unknownChildren,
+              })
+            : t('subtree.value', {
+                cost: formatMoney(headlineMicros, symbol),
+                own: formatMoney(ownMicros, symbol),
+                count: childCount,
+                children: formatMoney(subtree.childrenMicros, symbol),
+              })
       const localWindows = localWindowsText(pricing, now)
       const utcWindows = windowsText(pricing)
       const official = sourceText(pricing) === 'official'
@@ -1000,7 +1035,7 @@ window.__ModuleLoader__.load({
               showHolidayWarning ? h('span', { className: 'dsh-tc-hintWarn', 'aria-hidden': true }) : null,
             ),
           ),
-          h('span', { className: 'dsh-tc-titleValue' }, formatMoney(view.micros, symbol)),
+          h('span', { className: 'dsh-tc-titleValue' }, formatMoney(headlineMicros, symbol)),
         ),
         h('div', { className: 'dsh-tc-titleRule', 'aria-hidden': true }),
         hintOpen
@@ -1025,6 +1060,7 @@ window.__ModuleLoader__.load({
           'dl',
           { className: 'dsh-tc-details' },
           h(Row, { label: t('total'), value: formatMoney(view.micros, symbol) }),
+          subtreeText === null ? null : h(Row, { label: t('total.withSubagents'), value: subtreeText }),
           h(Row, {
             label: t('peakCost'),
             value: t('band.spend', { cost: formatMoney(view.peakMicros, symbol), tokens: formatTokens(tokenTotal(view.peak.tokens)) }),
@@ -1141,7 +1177,12 @@ window.__ModuleLoader__.load({
       const close = () => setOpen(false)
       const band = bandAt(view.pricing, now)
       const bandLabel = t(band === 'offPeak' ? 'band.offPeak' : 'band.peak')
-      const cost = formatMoney(view.micros, view.symbol)
+      // The pill answers "what did this task cost", so it shows the whole tree
+      // (own requests plus every delegated Session). The dialog keeps the split.
+      const subtree = view.subtree ?? null
+      const pillMicros = typeof subtree?.micros === 'number' ? subtree.micros : view.micros
+      const childCount = typeof subtree?.childCount === 'number' ? subtree.childCount : 0
+      const cost = formatMoney(pillMicros, view.symbol)
       // A subtle amber dot makes a stale/degraded data source discoverable
       // without opening the dialog or reading logs.
       const warning = dataWarningOf(view.status ?? null)
@@ -1157,7 +1198,7 @@ window.__ModuleLoader__.load({
             className: 'dsh-tc-pill',
             'aria-haspopup': 'dialog',
             'aria-expanded': open,
-            'aria-label': `${t('pill.aria', { cost, band: bandLabel })}${warningSuffix}`,
+            'aria-label': `${t(childCount > 0 ? 'pill.ariaSubagents' : 'pill.aria', { cost, band: bandLabel, count: childCount })}${warningSuffix}`,
             onClick: () => setOpen((value) => !value),
           },
           h(CostIcon),

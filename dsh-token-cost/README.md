@@ -110,25 +110,27 @@ The **Chinese public holiday calendar** is not on the pricing page and has no of
 machine-readable API — the State Council publishes an annual prose notice. The plugin therefore
 fetches a configurable JSON calendar (`holidaysSource`, default
 [timor.tech](https://timor.tech/api/holiday/year/2026), which mirrors that notice: days off including
-adjusted days, makeup workdays ignored), unions it with the manual `holidays` list and the fixed
-statutory anchors (元旦 / 春节 / 劳动节 / 国庆节, each covering its whole statutory block), and uses
-the Beijing date (`holidayOffsetMinutes`, default `480`) for the lookup. The anchors cover years whose
-arrangement is not published yet, so the cost meter applies the same estimate as the sidebar clock
-instead of silently charging peak. Alternative sources:
+adjusted days, makeup workdays ignored). Only the **current Beijing year** is requested; returned
+dates from other years are excluded. Confirmed dates are unioned with current-year entries from the
+manual `holidays` list, using `holidayOffsetMinutes` (default `480`) for the calendar boundary.
+**Unpublished dates are never estimated**, including fixed-date holidays and multi-day blocks.
+Without a known holiday entry, ordinary weekend and peak-window rules apply. Alternative sources:
 
 - [Nager.Date](https://date.nager.at/api/v3/PublicHolidays/2026/CN) — `PublicHolidays/{year}/CN`,
   statutory days only (it does not include every adjusted day off);
 - any URL returning `["2026-10-01", ...]`, `{ "dates": [...] }`, Nager's `[{ "date": ... }]`, or
   timor's `{ "holiday": { "10-01": { "holiday": true } } }` shape;
-- `holidaysSource: false` to stay fully offline and rely on the manual list plus the anchors.
+- `holidaysSource: false` to stay fully offline and rely on explicitly configured dates.
 
 The calendar is effective-dated like the rates: it is part of each epoch, so a newly fetched calendar
 applies to requests after the fetch. The snapshot records `holidayProvenance = { auto, manual, fixed }`,
-so the dialog can say which dates are published data, manual entries, or anchor estimates; the live
-status additionally reports staleness and the last refresh failure.
+so the dialog can distinguish fetched and manual dates. New snapshots always have an empty `fixed`
+bucket; that field is retained only to read historical snapshots. Existing checkpoints retain their
+billed amounts and original epochs; on upgrade, a new policy boundary removes old estimates for
+subsequent requests without forcing a full replay. Live status reports freshness and refresh failures.
 
 `peakWindows`, `weekdaysOnly`, and `offPeakEnabled` can be overridden in config for a different
-contract. The band rules themselves — peak windows, the Beijing holiday rule, and the anchors — are
+contract. The band rules themselves — peak windows and the Beijing holiday rule — are
 the canonical `shared/tariff/index.js`, shared with `dsh-sidebar-clock`; this bundle carries a
 generated Host copy (`tariff.js`) and an inlined client copy, refreshed by
 `node tools/sync-shared.mjs`.
@@ -199,19 +201,21 @@ What a successful refresh means:
   their models). A redesign therefore fails **explicitly**: the last good card is kept, the status is
   marked `degraded` with a human-readable reason, and the UI shows it instead of silently pricing
   with old data. The card records `parserVersion` and `pageVariant` (`zh` = CNY, `en` = USD).
-- **Holidays.** The success timestamp moves only when at least one requested year was fetched *and*
-  parsed. A total failure keeps the previous calendar and retries after **5 min → 15 min → 1 h**,
+- **Holidays.** Only the current calendar year is fetched. The success timestamp moves only after
+  validating the response; HTTP-200 business errors, unknown shapes and invalid dates are failures.
+  A valid empty calendar is accepted and clears previous automatic dates. A failure keeps the last
+  good calendar and retries after **5 min → 15 min → 1 h**,
   staying hourly while it keeps failing; a success returns to `holidayRefreshIntervalMs` (default
-  24 h). Partial failures keep the previous dates for the failed year.
+  24 h). A response completing after its requested year has ended is discarded and retried for the
+  new current year. No next-year calendar is prefetched.
 
 The wire value separates billed facts from live freshness:
 
 - `view.pricing` describes the **current** epoch (what new requests are priced with) and carries the
   whole `epochs` timeline — each with its `effectiveFrom`/`effectiveTo`, currency and rates — plus
   `parserVersion`, `pageVariant`, and `holidayProvenance = { auto, manual, fixed }`; `holidays`
-  remains the sorted union array. The fixed anchors are rebuilt for the session's own Beijing years
-  even when the epoch was fetched earlier, so a session created in an unpublished year still agrees
-  with the clock.
+  remains the sorted union of known dates. `holidayPolicyVersion: 3` marks the no-estimates policy.
+  A historical epoch keeps its calendar for inspecting already billed requests.
 - `view.status` is **live Host state**, not part of the billed facts: `pricing` (`fetchedAt`,
   `attemptedAt`, `parserVersion`, `source`, `degraded`, `degradedReason`, `stale`,
   `refreshIntervalMs`) and `holidays` (`fetchedAt`, `attemptedAt`, `source`, `error`, `stale`,
@@ -227,7 +231,7 @@ The wire value separates billed facts from live freshness:
 The UI surfaces this without reading logs: a small amber dot on the pill when pricing is stale or
 degraded, or when holidays are stale or failing; the info hint adds a `stale`/`degraded` badge, the
 rate timeline, the excluded providers, and lines for the current rate read time, the holiday
-calendar's per-source counts (auto/manual/fixed anchors), and the last failure with its next retry
+calendar's per-source counts (auto/manual; legacy estimates labelled only on old snapshots), and the last failure with its next retry
 time.
 
 ## Configuration

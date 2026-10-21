@@ -20,7 +20,8 @@
         pricingSource: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
         refreshIntervalMs: 21600000
         fetchTimeoutMs: 15000
-        # Chinese public-holiday calendar: {year} is replaced with the year.
+        # Chinese public-holiday calendar: fetch only the current Beijing year.
+        # {year} is replaced with that year; unpublished dates are never estimated.
         # The default mirrors the State Council arrangement (days off, including
         # adjusted days; makeup workdays are ignored). Set false to stay offline
         # and rely on the manual `holidays` list below.

@@ -17,7 +17,6 @@ const {
   foldEvent,
   syncEpochs,
   subtreeOf,
-  fixedHolidayDateKeys,
   initialState,
   DEFAULT_RATE_CARD,
 } = internals
@@ -77,7 +76,6 @@ const header = (time = 0, provider = 'deepseek-account', model = 'deepseek-flash
 const stepStart = (time) => ({ type: 'step/start', seq: 1, time, data: { turn: 1, step: 1 } })
 
 /** Sorted statutory anchor dates for the given years (from the canonical rules). */
-const fixedAnchorsOf = (years) => fixedHolidayDateKeys(years)
 
 // --- official pricing page parser ------------------------------------------
 {
@@ -150,7 +148,7 @@ const fixedAnchorsOf = (years) => fixedHolidayDateKeys(years)
   // Plain array / dates object, with out-of-year entries dropped.
   assert.deepEqual(parseHolidayPayload(['2026-05-01', '2027-01-01'], 2026), ['2026-05-01'])
   assert.deepEqual(parseHolidayPayload({ dates: ['2026-06-19'] }, 2026), ['2026-06-19'])
-  assert.deepEqual(parseHolidayPayload({}, 2026), [])
+  assert.throws(() => parseHolidayPayload({}, 2026), /payload/i)
 }
 
 // --- tariff policy ----------------------------------------------------------
@@ -761,10 +759,10 @@ function createFakeTimers(startMs) {
     auto: ['2026-10-01', '2026-10-02', '2026-01-01'],
     fixed: ['2026-01-01', '2026-05-01', '2027-10-01'],
   })
-  assert.deepEqual(merged.holidays, ['2026-01-01', '2026-05-01', '2026-10-01', '2026-10-02', '2027-10-01'])
+  assert.deepEqual(merged.holidays, ['2026-01-01', '2026-05-01', '2026-10-01', '2026-10-02'])
   assert.deepEqual(merged.holidayProvenance.manual, ['2026-05-01', '2026-10-01'], 'manual dates win attribution')
   assert.deepEqual(merged.holidayProvenance.auto, ['2026-01-01', '2026-10-02'], 'auto dates excluded from manual/fixed')
-  assert.deepEqual(merged.holidayProvenance.fixed, ['2027-10-01'], 'fixed anchors fill only dates no published source covers')
+  assert.deepEqual(merged.holidayProvenance.fixed, [], 'legacy estimates are not merged into new calendars')
   const attributed = merged.holidayProvenance.auto.length + merged.holidayProvenance.manual.length + merged.holidayProvenance.fixed.length
   assert.equal(attributed, merged.holidays.length, 'provenance counts add up to the union size')
   assert.deepEqual(mergeHolidayCalendar({}).holidays, [])
@@ -826,7 +824,7 @@ function createFakeTimers(startMs) {
   assert.match(status.holidays.error, /HTTP 503/)
   assert.equal(status.holidays.nextRetryAt, start + 5 * 60_000, 'the first failure retries after 5 minutes')
   assert.equal(status.holidays.stale, true, 'never fetched while auto refresh is enabled is stale')
-  assert.equal(holidayUrls.length, 2, 'both requested years were attempted')
+  assert.equal(holidayUrls.length, 1, 'only the current year was attempted')
   assert.ok(statuses.length >= 1, 'the controller reports live status')
   assert.ok(warnings.some((message) => message.includes('holiday refresh failed')))
 
@@ -855,20 +853,19 @@ function createFakeTimers(startMs) {
   assert.equal(status.holidays.nextRetryAt, status.holidays.fetchedAt + 24 * 60 * 60_000, 'a success returns to the 24h interval')
 
   const holidayCard = cards[cards.length - 1]
-  // The fetched National Day dates win; every other statutory block is filled
-  // from the canonical fixed anchors (元旦 1 day, 春节 7, 劳动节 5, 国庆节 7).
+  // Only fetched dates for the current year enter the calendar.
   assert.deepEqual(
     holidayCard.holidays,
-    [...new Set([...fixedAnchorsOf([2026, 2027]), '2026-10-01', '2027-10-01'])].sort(),
-    'the fetched calendar plus the 2026/2027 statutory anchors',
+    ['2026-10-01'],
+    'the fetched calendar contains only current-year dates',
   )
   assert.equal(holidayCard.holidaysSource, 'auto')
-  assert.deepEqual(holidayCard.holidayProvenance.auto, ['2026-10-01', '2027-10-01'])
+  assert.deepEqual(holidayCard.holidayProvenance.auto, ['2026-10-01'])
   assert.deepEqual(holidayCard.holidayProvenance.manual, [])
   assert.deepEqual(
     holidayCard.holidayProvenance.fixed,
-    fixedAnchorsOf([2026, 2027]).filter((date) => date !== '2026-10-01' && date !== '2027-10-01'),
-    'a published National Day date is not also a fixed anchor',
+    [],
+    'no dates are estimated',
   )
   const attributed = holidayCard.holidayProvenance.auto.length + holidayCard.holidayProvenance.manual.length + holidayCard.holidayProvenance.fixed.length
   assert.equal(attributed, holidayCard.holidays.length, 'provenance counts add up to the union size')
@@ -917,8 +914,8 @@ function createFakeTimers(startMs) {
   assert.equal(cards.length, 1, 'the pricing card was published without waiting for holidays')
   assert.deepEqual(
     cards[0].holidays,
-    fixedAnchorsOf([2026, 2027]),
-    'the pricing publish already carries the statutory anchors (the auto calendar is still pending)',
+    [],
+    'no holiday estimates are published while the calendar is pending',
   )
   assert.equal(cards[0].parserVersion, 1)
   controller.stop()
@@ -1040,15 +1037,15 @@ function createFakeTimers(startMs) {
   const snapshot = catalog.snapshotFor(clock.now)
   assert.equal(snapshot.parserVersion, 1, 'the pricing snapshot records its parser version')
   const expectedProvenance = {
-    auto: ['2026-10-01', '2027-10-01'],
+    auto: ['2026-10-01'],
     manual: ['2026-05-01'],
-    fixed: fixedAnchorsOf([2026, 2027]).filter((date) => date !== '2026-10-01' && date !== '2027-10-01' && date !== '2026-05-01'),
+    fixed: [],
   }
   assert.deepEqual(snapshot.holidayProvenance, expectedProvenance)
   assert.deepEqual(
     snapshot.holidays,
     [...expectedProvenance.auto, ...expectedProvenance.manual, ...expectedProvenance.fixed].sort(),
-    'holidays stays the sorted union array including the fixed anchors',
+    'holidays stays the sorted union of confirmed dates',
   )
   assert.equal(snapshot.holidaysSource, 'auto')
   assert.ok(snapshot.holidayProvenance.fixed.includes('2026-05-01') === false, 'a manual date is not also a fixed anchor')
@@ -1114,8 +1111,8 @@ function createFakeTimers(startMs) {
   assert.equal(view.pricing.holidayProvenance.auto.includes(`${beijingYear}-10-01`), true)
   assert.deepEqual(
     view.pricing.holidayProvenance.fixed,
-    fixedAnchorsOf([beijingYear, beijingYear + 1]).filter((date) => !date.endsWith('-10-01')),
-    'the published National Day dates win; the other statutory anchors stay fixed',
+    [],
+    'the calendar includes no estimated dates',
   )
   cleanup()
 }

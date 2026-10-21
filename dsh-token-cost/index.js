@@ -33,7 +33,8 @@ import {
   PEAK_WINDOWS as CANONICAL_PEAK_WINDOWS,
   MINUTES_PER_DAY,
   bandAt as canonicalBandAt,
-  fixedHolidayDateKeys,
+  TARIFF_VERSION,
+  isHolidayDate,
   holidayProvenance,
   holidayYears,
   parseHolidayPayload,
@@ -62,9 +63,6 @@ const SYMBOL_OF_CURRENCY = { CNY: '¥', USD: '$' }
 
 /** Official peak windows in UTC minutes: 01:00–04:00 and 06:00–10:00. */
 const DEFAULT_PEAK_WINDOWS = CANONICAL_PEAK_WINDOWS
-
-/** Beijing calendar offset used when a frozen snapshot carries none. */
-const DEFAULT_HOLIDAY_OFFSET_MINUTES = 480
 
 /**
  * Official peak rates per 1,000,000 tokens, mirrored from both published copies
@@ -184,11 +182,11 @@ const PARSER_VERSION = 1
 const HOLIDAY_RETRY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000]
 
 /**
- * Sessions created before DSH (or this plugin) existed have no meaningful
- * calendar years, so the fixed anchors are only added from a sane epoch on.
+ * Legacy/test timestamps such as 0 have no meaningful calendar year, so only
+ * real snapshot timestamps constrain explicitly supplied calendar dates.
  * `init` normally carries a real `createdAt`; tests/legacy states may pass 0.
  */
-const MIN_ANCHOR_TIME_MS = Date.UTC(2020, 0, 1)
+const MIN_CALENDAR_TIME_MS = Date.UTC(2020, 0, 1)
 
 /** A schema face sufficient for the projection registry (it only calls `parse`). */
 const passthroughSchema = { parse: (value) => value }
@@ -455,7 +453,7 @@ function holidayDateList(value) {
   if (!Array.isArray(value)) return []
   const keys = []
   for (const entry of value) {
-    if (typeof entry === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry)) keys.push(entry)
+    if (isHolidayDate(entry)) keys.push(entry)
   }
   return [...new Set(keys)].sort()
 }
@@ -464,31 +462,17 @@ function holidayDateList(value) {
  * Merge the holiday sources into the sorted union plus its provenance.
  *
  * This is the single seam for holiday policy: the Host refresh controller calls
- * it with the fetched (`auto`) calendar, the configured (`manual`) extras, and
- * the Beijing years that the canonical fixed anchors must cover. Each date is
- * attributed to exactly one source, with precedence `manual` > `auto` > `fixed`,
- * so provenance counts add up to the union size and a published arrangement
- * always wins over an anchor estimate. `holidays` stays the sorted union array
- * so `bandOf` keeps working unchanged.
+ * it with the validated (`auto`) calendar, configured (`manual`) extras, and
+ * the current calendar year. Missing dates are never generated.
  *
- * @param {{ manual?: unknown, auto?: unknown, fixed?: unknown, years?: number[] }} sources - date lists and anchor years.
+ * @param {{ manual?: unknown, auto?: unknown, years?: number[] }} sources - date lists and optional year filter.
  * @returns {{ holidays: string[], holidayProvenance: { auto: string[], manual: string[], fixed: string[] } }} merged calendar.
  */
 function mergeHolidayCalendar(sources) {
   const manual = holidayDateList(sources?.manual)
   const auto = holidayDateList(sources?.auto)
-  const years = Array.isArray(sources?.years) ? sources.years.filter((year) => Number.isInteger(year)) : []
+  const years = Array.isArray(sources?.years) ? sources.years.filter((year) => Number.isInteger(year)) : undefined
   const provenance = holidayProvenance({ manual, auto, years })
-  const explicitFixed = holidayDateList(sources?.fixed)
-  if (explicitFixed.length > 0) {
-    const manualSet = new Set(provenance.manual)
-    const autoSet = new Set(provenance.auto)
-    const fixedSet = new Set(provenance.fixed)
-    for (const date of explicitFixed) {
-      if (!manualSet.has(date) && !autoSet.has(date)) fixedSet.add(date)
-    }
-    provenance.fixed = [...fixedSet].sort()
-  }
   return { holidays: provenanceDates(provenance), holidayProvenance: provenance }
 }
 
@@ -716,22 +700,21 @@ function resolveSettings(config) {
  * own start time, so a price change splits the timeline and each request is
  * charged at the price that applied when it ran.
  *
- * The holiday calendar is rebuilt per Session so the fixed statutory anchors
- * cover the Session's own Beijing years even when the epoch was fetched years
- * earlier (or offline). Each date keeps exactly one provenance bucket, matching
- * the clock's calendar for the same years.
+ * The calendar contains only supplied dates for the card's year. A card keeps
+ * its own year when replayed later; no future dates or estimates are generated.
  *
  * @param {object} card - catalog card.
  * @param {PluginSettings} settings - plugin settings.
- * @param {number} [createdAt] - Session creation time (determines anchor years).
+ * @param {number} [createdAt] - Session creation time for a configured card.
  * @returns {object} pricing snapshot stored in projection state.
  */
 function makePricingSnapshot(card, settings, createdAt) {
   const currency = settings.currency || card.currency || 'CNY'
-  const years =
-    typeof createdAt === 'number' && Number.isFinite(createdAt) && createdAt >= MIN_ANCHOR_TIME_MS
-      ? holidayYears(createdAt)
-      : []
+  const calendarTime = card.fetchedAt > 0 ? card.fetchedAt : createdAt
+  const years = Number.isInteger(card.holidayYear) ? [card.holidayYear] :
+    typeof calendarTime === 'number' && Number.isFinite(calendarTime) && calendarTime >= MIN_CALENDAR_TIME_MS
+      ? holidayYears(calendarTime, settings.holidayOffsetMinutes)
+      : undefined
   const seed = normalizeHolidayProvenance(card)
   const provenance = holidayProvenance({
     manual: holidayDateList([...seed.manual, ...settings.holidays]),
@@ -755,6 +738,7 @@ function makePricingSnapshot(card, settings, createdAt) {
     holidays: provenanceDates(provenance),
     holidaysSource: holidaysKindOf(provenance),
     holidayProvenance: provenance,
+    holidayPolicyVersion: TARIFF_VERSION,
     parserVersion: typeof card.parserVersion === 'number' && Number.isFinite(card.parserVersion) ? card.parserVersion : null,
     pageVariant: typeof card.pageVariant === 'string' ? card.pageVariant : null,
     autoRefresh: {
@@ -903,13 +887,8 @@ function createPricingCatalog(settings) {
 /**
  * Classify one request time into a tariff band under a frozen policy.
  *
- * A frozen snapshot records the holiday calendar as it was when the session
- * was created, so a session that started *before* the calendar was fetched
- * carries an empty list. Under the published rule ("excluding Chinese public
- * holidays") an empty calendar would silently charge every holiday as peak, so
- * the fixed statutory anchors are unioned in at evaluation time. The anchors do
- * not depend on the session's creation time, so this cannot rewrite history
- * beyond restoring the published holiday exemption.
+ * An empty calendar grants no holiday exemption; weekend and time-window
+ * rules still apply. Historical epochs retain their recorded policy.
  *
  * @param {number} timeMs - request start time.
  * @param {object} pricing - frozen session pricing snapshot.
@@ -918,17 +897,12 @@ function createPricingCatalog(settings) {
 function bandOf(timeMs, pricing) {
   const peakWindows = Array.isArray(pricing.peakWindows) ? pricing.peakWindows : DEFAULT_PEAK_WINDOWS
   const weekdaysOnly = pricing.weekdaysOnly
-  const offset = typeof pricing.holidayOffsetMinutes === 'number' ? pricing.holidayOffsetMinutes : DEFAULT_HOLIDAY_OFFSET_MINUTES
-  let holidays = pricing.holidays
-  if (weekdaysOnly !== false && (holidays === undefined || holidays === null || holidays.length === 0) && Number.isFinite(timeMs) && timeMs > 0) {
-    holidays = fixedHolidayDateKeys([new Date(timeMs + offset * 60_000).getUTCFullYear()])
-  }
   return canonicalBandAt(timeMs, {
     peakWindows,
     weekdaysOnly,
     offPeakEnabled: pricing.offPeakEnabled,
     holidayOffsetMinutes: pricing.holidayOffsetMinutes,
-    holidays,
+    holidays: pricing.holidays,
   })
 }
 
@@ -1203,6 +1177,31 @@ function syncEpochs(state, epochs) {
   const current = state.pricing
   const pricing = current !== undefined && current !== null && typeof current.effectiveFrom === 'number' && current.effectiveFrom > latest.effectiveFrom ? current : latest
   return { ...state, epochs: merged, pricing }
+}
+
+/**
+ * Append a calendar-policy boundary to legacy checkpoints, retaining their
+ * rates and billed bands. Do not bump stateVersion and force a full reprice.
+ * The activation timestamp is stable across view reads in this process.
+ */
+function upgradeHolidayPolicy(state, activatedAt, settings) {
+  const current = epochAt(state, activatedAt)
+  if (current?.holidayPolicyVersion >= TARIFF_VERSION) return state
+  const seed = normalizeHolidayProvenance(current)
+  const calendar = mergeHolidayCalendar({
+    auto: seed.auto,
+    manual: [...seed.manual, ...settings.holidays],
+    years: holidayYears(activatedAt, settings.holidayOffsetMinutes),
+  })
+  return syncEpochs(state, [{
+    ...current,
+    ...calendar,
+    holidaysSource: holidaysKindOf(calendar.holidayProvenance),
+    holidayPolicyVersion: TARIFF_VERSION,
+    version: `${current.version}:holidays-v${TARIFF_VERSION}`,
+    effectiveFrom: activatedAt,
+    effectiveTo: null,
+  }])
 }
 
 /**
@@ -1917,11 +1916,11 @@ function createRefreshController(options = {}) {
   let pricingCard = settings.fallbackCard
   /** The last successfully fetched `auto` holiday dates (kept across failures). */
   let autoHolidays = []
-  /** Beijing years whose fixed statutory anchors must be part of the calendar. */
-  const anchorYears = (timeMs) => holidayYears(timeMs, holidayOffsetMinutes)
+  /** Only the current calendar year is fetched and published. */
+  const calendarYears = (timeMs) => holidayYears(timeMs, holidayOffsetMinutes)
   /**
    * Identity of a published calendar: the union *and* the provenance, because a
-   * fetched date may replace a fixed anchor without changing the union.
+   * date can change between manual and automatic without changing the union.
    */
   const calendarKeyOf = (merged) =>
     [
@@ -1930,7 +1929,7 @@ function createRefreshController(options = {}) {
       merged.holidayProvenance.manual.join(','),
       merged.holidayProvenance.fixed.join(','),
     ].join('|')
-  let emittedHolidayKey = calendarKeyOf(mergeHolidayCalendar({ manual: manualHolidays, auto: [], years: anchorYears(now()) }))
+  let emittedHolidayKey = calendarKeyOf(mergeHolidayCalendar({ manual: manualHolidays, auto: [], years: calendarYears(now()) }))
   let running = false
   let pricingTimer = null
   let holidayTimer = null
@@ -2016,7 +2015,7 @@ function createRefreshController(options = {}) {
    */
   const publish = (fetchedAt, force) => {
     if (isDisposed()) return
-    const merged = mergeHolidayCalendar({ manual: manualHolidays, auto: autoHolidays, years: anchorYears(fetchedAt) })
+    const merged = mergeHolidayCalendar({ manual: manualHolidays, auto: autoHolidays, years: calendarYears(fetchedAt) })
     const key = calendarKeyOf(merged)
     if (force !== true && key === emittedHolidayKey) return
     emittedHolidayKey = key
@@ -2025,6 +2024,7 @@ function createRefreshController(options = {}) {
       holidays: merged.holidays,
       holidaysSource: holidaysKindOf(merged.holidayProvenance),
       holidayProvenance: merged.holidayProvenance,
+      holidayYear: calendarYears(fetchedAt)[0],
       fetchedAt,
     }
     try {
@@ -2125,67 +2125,49 @@ function createRefreshController(options = {}) {
     }
   }
 
-  /** Fetch the holiday source(s); a total failure is retried with a short backoff. */
+  /** Fetch only the current year's calendar; failures keep the last good data. */
   const runHolidays = async () => {
     if (!holidaysEnabled || !canFetch || holidayInFlight || !running || isDisposed()) return
     holidayInFlight = true
     const attemptedAt = now()
     holidayStatus.attemptedAt = attemptedAt
-    const shiftedYear = new Date(attemptedAt + holidayOffsetMinutes * 60_000).getUTCFullYear()
-    const years = holidaysSource.includes('{year}') ? [shiftedYear, shiftedYear + 1] : [shiftedYear]
-    const collected = []
-    const errors = []
-    /** Years whose request failed; their last good dates are retained. */
-    const failedYears = []
-    let responded = false
+    const year = calendarYears(attemptedAt)[0]
     try {
-      for (const year of years) {
+      let dates
+      try {
         const url = holidaysSource.replaceAll('{year}', String(year))
-        try {
-          const result = await web.fetch({ url }, fetchSignal(settings.fetchTimeoutMs))
-          if (isDisposed()) return
-          if (!isSuccessfulResponse(result)) {
-            const statusCode = responseStatusCode(result)
-            errors.push(`${year}: HTTP ${statusCode === null ? 'no response' : statusCode}`)
-            failedYears.push(year)
-            continue
-          }
-          let payload
-          try {
-            payload = JSON.parse(responseContent(result))
-          } catch (error) {
-            errors.push(`${year}: invalid JSON (${messageOf(error)})`)
-            failedYears.push(year)
-            continue
-          }
-          responded = true
-          for (const date of parseHolidayPayload(payload, year)) collected.push(date)
-        } catch (error) {
-          if (isDisposed()) return
-          errors.push(`${year}: ${messageOf(error)}`)
-          failedYears.push(year)
+        const result = await web.fetch({ url }, fetchSignal(settings.fetchTimeoutMs))
+        if (isDisposed()) return
+        if (!isSuccessfulResponse(result)) {
+          const statusCode = responseStatusCode(result)
+          throw new Error(`HTTP ${statusCode === null ? 'no response' : statusCode}`)
         }
-      }
-      if (isDisposed()) return
-      for (const message of errors) warn(`[token-cost] holiday refresh failed for ${message}`)
-      if (!responded) {
+        let payload
+        try {
+          payload = JSON.parse(responseContent(result))
+        } catch (error) {
+          throw new Error(`invalid JSON (${messageOf(error)})`)
+        }
+        dates = parseHolidayPayload(payload, year)
+        if (calendarYears(now())[0] !== year) throw new Error('holiday calendar year changed during refresh')
+      } catch (error) {
+        if (isDisposed()) return
         holidayStatus.consecutiveFailures += 1
-        holidayStatus.error = errors.length > 0 ? errors.join('; ') : 'holiday source returned no payload'
+        holidayStatus.error = `${year}: ${messageOf(error)}`
         const retryDelay = holidayRetryDelayMs(holidayStatus.consecutiveFailures)
         holidayStatus.nextRetryAt = now() + retryDelay
         warn(`[token-cost] holiday refresh failed (${holidayStatus.consecutiveFailures} in a row): ${holidayStatus.error}; retrying in ${Math.round(retryDelay / 60_000)} min`)
         scheduleHolidays(retryDelay)
         return
       }
-      // At least one requested year answered: this counts as a successful
-      // refresh. Dates for years that failed keep their previous values.
+      // Only a validated response is successful, including a valid empty list.
+      const firstSuccess = holidayStatus.fetchedAt === 0
       holidayStatus.fetchedAt = now()
       holidayStatus.consecutiveFailures = 0
       holidayStatus.error = null
-      const retained = autoHolidays.filter((date) => failedYears.some((year) => date.startsWith(`${year}-`)))
-      autoHolidays = holidayDateList([...retained, ...collected])
+      autoHolidays = dates
       holidayStatus.nextRetryAt = holidayStatus.fetchedAt + holidayInterval
-      publish(holidayStatus.fetchedAt, false)
+      publish(holidayStatus.fetchedAt, firstSuccess)
       scheduleHolidays(holidayInterval)
     } finally {
       holidayInFlight = false
@@ -2248,6 +2230,7 @@ function createRefreshController(options = {}) {
  */
 export function apply(ctx, config) {
   const settings = resolveSettings(config)
+  const activatedAt = Date.now()
   const catalog = createPricingCatalog(settings)
   /** The live refresh controller, read by `wire.view` for `view.status`. */
   const live = { controller: null }
@@ -2307,11 +2290,11 @@ export function apply(ctx, config) {
     // A Session opens with the timeline known now; later fetches are merged by
     // `foldEvent`, so a price change only affects requests after it arrived.
     init: (header) => initialState(catalog.epochsFor(header?.createdAt), header?.id ?? null),
-    apply: (state, event) => foldEvent(state, event, catalogEpochs()),
+    apply: (state, event) => foldEvent(upgradeHolidayPolicy(state, activatedAt, settings), event, catalogEpochs()),
     wire: {
       viewSchema: passthroughSchema,
       view: (state) => {
-        const synced = syncEpochs(state, catalogEpochs())
+        const synced = syncEpochs(upgradeHolidayPolicy(state, activatedAt, settings), catalogEpochs())
         const status = live.controller === null ? null : { ...live.controller.status(), catalogVersion: catalogVersionLabel() }
         const lookup = (id) => ownAmounts.get(id)
         // Price once per currency this Session's timeline actually has a table
@@ -2456,7 +2439,6 @@ export const internals = {
   epochAt,
   syncEpochs,
   subtreeOf,
-  fixedHolidayDateKeys,
   priceTokens,
   priceModel,
   normalizeTokens,

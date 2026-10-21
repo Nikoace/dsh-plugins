@@ -77,24 +77,24 @@ check('weekend saturday target day', new Date(lib.weekendBoundary(saturday).targ
 const sunday = new Date(2026, 9, 18, 10, 0, 0).getTime()
 check('weekend sunday target day', new Date(lib.weekendBoundary(sunday).target).getDay(), 1)
 
-// Holiday selection: union of fetched entries and fixed anchors for years
-// without published data.
+// Holiday selection: confirmed entries in the current year only.
 const dates = lib.holidayDatesForYears(
   [
     { date: '2026-10-01', name: '国庆节' },
     { date: '2027-01-01', name: '' },
   ],
-  [2026, 2027],
+  [2026],
 )
-check('holiday anchors 2027-05-01', dates['2027-05-01'], '劳动节')
+check('no holiday estimates', dates['2026-05-01'], undefined)
+check('next year excluded', dates['2027-01-01'], undefined)
 check('holiday fetched name kept', dates['2026-10-01'], '国庆节')
-check('holiday next after Oct 19', lib.nextHoliday(Date.UTC(2026, 9, 19, 6, 0), dates).key, '2027-01-01')
+check('no known holiday after Oct 19', lib.nextHoliday(Date.UTC(2026, 9, 19, 6, 0), dates), null)
 check('holiday next is today', lib.nextHoliday(Date.UTC(2026, 9, 1, 6, 0), dates).today, true)
 // The holiday target is Beijing midnight (same instant the band flips).
 check(
   'holiday target is Beijing midnight',
-  lib.nextHoliday(Date.UTC(2026, 9, 19, 6, 0), dates).target,
-  Date.UTC(2027, 0, 1) - 480 * 60000,
+  lib.nextHoliday(Date.UTC(2026, 8, 28, 6, 0), dates).target,
+  Date.UTC(2026, 9, 1) - 480 * 60000,
 )
 // Beijing date boundary: 2026-09-30T17:00Z is 2026-10-01 in Beijing.
 check('beijing date at 17:00Z', lib.beijingDateKey(Date.UTC(2026, 8, 30, 17, 0)), '2026-10-01')
@@ -128,7 +128,7 @@ const dict = (name) => {
 const zhKeys = dict('zh')
 const enKeys = dict('en')
 check('zh/en key parity', zhKeys.slice().sort(), enKeys.slice().sort())
-check('dictionary count', zhKeys.length, 11)
+check('dictionary count', zhKeys.length, 12)
 
 // Balance: Account Remote result handling and wallet formatting.
 check('clientVersion fallback', balanceLib.clientVersion(), '0.2.1-rc.2')

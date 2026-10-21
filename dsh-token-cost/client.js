@@ -85,9 +85,9 @@ window.__ModuleLoader__.load({
       'pricing.excludedRoutes': '不计价：{providers}',
       'model.excluded': '{count} 次未计价',
       'model.epochs': '{count} 个费率时段',
-      'pricing.holidaysMissing': '节假日日历：未配置，节假日将按高峰计费。',
+      'pricing.holidaysMissing': '本年度暂无已知节假日；按周末和峰谷时段计费，不预估假期。',
       'pricing.configLate': '（尚未成功读取官方价目表，暂用本地后备费率）',
-      'pricing.holidaysMissingLate': '节假日日历：尚未获取（节假日按高峰计）；获取后会自动更新。',
+      'pricing.holidaysMissingLate': '本年度暂无已知节假日；按周末和峰谷时段计费，获取成功后自动更新，不预估假期。',
       'hint.show': '计价与费率说明',
       'hint.basis': '高峰按 UTC {windows} 判定；工作日与节假日按 UTC/北京日期判定。',
       'hint.holidaysAuto': '节假日日历：自动获取 {count} 天。',
@@ -102,7 +102,8 @@ window.__ModuleLoader__.load({
       'hint.ratesNever': '当前尚未成功读取官方费率。',
       'hint.ratesDegraded': '费率抓取异常：{reason}；仍使用 {time} 的费率。',
       'hint.ratesStale': '费率数据已陈旧（最近成功读取 {time}）。',
-      'hint.holidaysProvenance': '节假日日历：自动 {auto} 天 · 手动 {manual} 天 · 固定锚点 {fixed} 天。',
+      'hint.holidaysProvenance': '节假日日历：自动 {auto} 天 · 手动 {manual} 天。',
+      'hint.holidaysProvenanceLegacy': '历史节假日日历：自动 {auto} 天 · 手动 {manual} 天 · 旧版估算 {fixed} 天。',
       'hint.holidaysFailed': '节假日获取失败：{reason}；下次重试 {time}。',
       'hint.holidaysFailedNoRetry': '节假日获取失败：{reason}。',
       'hint.holidaysStale': '节假日日历已陈旧（最近成功获取 {time}）。',
@@ -164,9 +165,9 @@ window.__ModuleLoader__.load({
       'pricing.excludedRoutes': 'Not priced: {providers}',
       'model.excluded': '{count} not priced',
       'model.epochs': '{count} rate segments',
-      'pricing.holidaysMissing': 'Holiday calendar: not configured; holidays are charged as peak.',
+      'pricing.holidaysMissing': 'No known holidays for this year; weekend and time-window rules apply. Holidays are not estimated.',
       'pricing.configLate': ' (the official price page has not been read yet, so the local fallback card is in use)',
-      'pricing.holidaysMissingLate': 'Holiday calendar: not fetched yet (holidays are charged as peak); it updates automatically once fetched.',
+      'pricing.holidaysMissingLate': 'No known holidays for this year; weekend and time-window rules apply until a successful refresh. Holidays are not estimated.',
       'hint.show': 'Pricing and rate details',
       'hint.basis': 'Peak uses UTC {windows}; weekday and holiday rules follow UTC/Beijing dates.',
       'hint.holidaysAuto': 'Holiday calendar: {count} days fetched automatically.',
@@ -181,7 +182,8 @@ window.__ModuleLoader__.load({
       'hint.ratesNever': 'The official rates have not been fetched successfully yet.',
       'hint.ratesDegraded': 'Rate refresh failed: {reason}; still using the rates from {time}.',
       'hint.ratesStale': 'Rate data is stale (last successful read {time}).',
-      'hint.holidaysProvenance': 'Holiday calendar: {auto} auto · {manual} manual · {fixed} fixed anchors (days).',
+      'hint.holidaysProvenance': 'Holiday calendar: {auto} auto · {manual} manual (days).',
+      'hint.holidaysProvenanceLegacy': 'Historical holiday calendar: {auto} auto · {manual} manual · {fixed} legacy estimates (days).',
       'hint.holidaysFailed': 'Holiday fetch failed: {reason}; retrying at {time}.',
       'hint.holidaysFailedNoRetry': 'Holiday fetch failed: {reason}.',
       'hint.holidaysStale': 'Holiday calendar is stale (last successful fetch {time}).',
@@ -294,16 +296,15 @@ window.__ModuleLoader__.load({
        *   past midnight (`start > end`).
        * - Weekends are off-peak all day when `weekdaysOnly` is on.
        * - Chinese holidays are evaluated on the Beijing calendar (fixed UTC+8
-       *   offset, no DST). Dates come from an automated source, a manual list, or
-       *   the fixed statutory anchors (Jan 1 / May 1 / Oct 1) used for years whose
-       *   arrangements are not published yet.
+       *   offset, no DST). Fetch only the current year. Dates come from a validated
+       *   source or an explicit manual list; unavailable dates are never estimated.
        *
        * Changing any published rule means changing this file (and bumping
        * `TARIFF_VERSION` when the *behaviour* changes), then regenerating the copies.
        */
 
       /** Rule revision; bump on behaviour changes so snapshots/UI can report it. */
-      const TARIFF_VERSION = 2
+      const TARIFF_VERSION = 3
 
       /** UTC peak windows: 01:00–04:00 and 06:00–10:00 (official rate card). */
       const PEAK_WINDOWS = [
@@ -321,22 +322,12 @@ window.__ModuleLoader__.load({
       const MINUTE_MS = 60_000
       const DAY_MS = 24 * 60 * MINUTE_MS
 
-      /**
-       * Fixed statutory anchors, used for years without a published arrangement
-       * (and as the offline fallback). Each entry is `[MM-DD, display name, days]`,
-       * where `days` is the length of the statutory block starting on that date:
-       * 元旦 is one day, 劳动节 and 国庆节 are seven consecutive days, and 春节 is
-       * seven days around the lunar New Year (which the fixed calendar cannot place,
-       * so only 02-01 is approximated). These are deliberately *estimates* for
-       * unpublished years: covering the whole block is much closer to the published
-       * arrangement than charging every adjusted day off as peak.
-       */
-      const FIXED_HOLIDAYS = [
-        ['01-01', '元旦', 1],
-        ['02-01', '春节', 7],
-        ['05-01', '劳动节', 5],
-        ['10-01', '国庆节', 7],
-      ]
+      /** Strict calendar date validation; Date.parse alone normalizes February 30. */
+      function isHolidayDate(value) {
+        if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+        const time = Date.parse(`${value}T00:00:00.000Z`)
+        return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value
+      }
 
       /** Zero-pad a non-negative integer to two digits. */
       function pad2(value) {
@@ -494,88 +485,34 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * Beijing years a calendar must cover at `timeMs`: the current one and the
-       * next one (so countdowns never fall off the end of the calendar).
+       * The current calendar year in Beijing (or an explicitly configured offset).
        *
        * @param {number} timeMs - epoch milliseconds.
        * @param {number} [offsetMinutes] - fixed offset; defaults to Beijing (+480).
-       * @returns {number[]} two ascending years.
+       * @returns {number[]} exactly one year.
        */
       function holidayYears(timeMs, offsetMinutes = HOLIDAY_OFFSET_MINUTES) {
         const year = new Date(timeMs + offsetMinutes * MINUTE_MS).getUTCFullYear()
-        return [year, year + 1]
-      }
-
-      /**
-       * Sorted fixed-anchor date keys for one or more years.
-       *
-       * A statutory block contributes every day it spans (`days` in
-       * `FIXED_HOLIDAYS`); a block ending in the next month or year is resolved on
-       * the real calendar, so 12-30 + 7 days still produces valid keys.
-       *
-       * @param {number[]} years - years.
-       * @returns {string[]} `YYYY-MM-DD` keys.
-       */
-      function fixedHolidayDateKeys(years) {
-        const keys = []
-        for (const year of years) {
-          for (const fixed of FIXED_HOLIDAYS) {
-            const start = Date.parse(`${year}-${fixed[0]}T00:00:00.000Z`)
-            if (!Number.isFinite(start)) continue
-            const length = Number.isInteger(fixed[2]) && fixed[2] > 0 ? fixed[2] : 1
-            for (let index = 0; index < length; index += 1) {
-              keys.push(new Date(start + index * DAY_MS).toISOString().slice(0, 10))
-            }
-          }
-        }
-        return [...new Set(keys)].sort()
-      }
-
-      /**
-       * Sorted fixed-anchor entries for one or more years, each with its display
-       * name, so a calendar built from anchors can still label a date.
-       *
-       * @param {number[]} years - years.
-       * @returns {Array<{ date: string, name: string }>} sorted entries.
-       */
-      function fixedHolidayEntries(years) {
-        const byDate = new Map()
-        for (const year of years) {
-          for (const fixed of FIXED_HOLIDAYS) {
-            const start = Date.parse(`${year}-${fixed[0]}T00:00:00.000Z`)
-            if (!Number.isFinite(start)) continue
-            const length = Number.isInteger(fixed[2]) && fixed[2] > 0 ? fixed[2] : 1
-            for (let index = 0; index < length; index += 1) {
-              const date = new Date(start + index * DAY_MS).toISOString().slice(0, 10)
-              if (!byDate.has(date)) byDate.set(date, { date, name: fixed[1] })
-            }
-          }
-        }
-        return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date))
+        return [year]
       }
 
       /**
        * Build a named holiday calendar from entries.
        *
-       * Entries are `{ date, name }` objects or plain `YYYY-MM-DD` strings. Fixed
-       * statutory anchors are added for every requested year unless the calendar
-       * already names that date.
+       * Only supplied, valid dates in the requested years are retained.
        *
        * @param {Array<{date: string, name?: string} | string>} entries - calendar entries.
-       * @param {number[]} years - years to fill with fixed anchors.
+       * @param {number[]} years - years to retain.
        * @returns {Record<string, string>} date key -> display name.
        */
       function holidayDatesForYears(entries, years) {
         const dates = {}
         for (const entry of entries ?? []) {
           const date = typeof entry === 'string' ? entry : entry === null || typeof entry !== 'object' ? undefined : entry.date
-          if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+          if (!isHolidayDate(date) || !years?.includes(Number(date.slice(0, 4)))) continue
           const name = typeof entry === 'object' && entry !== null && typeof entry.name === 'string' ? entry.name : ''
           if (name !== '') dates[date] = name
           else if (dates[date] === undefined) dates[date] = ''
-        }
-        for (const anchor of fixedHolidayEntries(years ?? [])) {
-          if (dates[anchor.date] === undefined) dates[anchor.date] = anchor.name
         }
         return dates
       }
@@ -583,27 +520,25 @@ window.__ModuleLoader__.load({
       /**
        * Split a holiday calendar into provenance buckets (auto / manual / fixed).
        *
-       * Every key appears in exactly one bucket; fixed anchors fill the years that
-       * neither source published. The union of the buckets is the calendar used for
-       * band decisions.
+       * Every supplied key appears in exactly one bucket. `fixed` remains empty for
+       * wire compatibility with older snapshots; new calendars never estimate dates.
+       * When years are supplied, retain only those years.
        *
        * @param {{ auto?: string[], manual?: string[], years?: number[] }} sources - calendar sources.
        * @returns {{ auto: string[], manual: string[], fixed: string[] }} sorted buckets.
        */
       function holidayProvenance(sources) {
         const manual = new Set()
+        const accepts = (key) => isHolidayDate(key) &&
+          (!Array.isArray(sources?.years) || sources.years.includes(Number(key.slice(0, 4))))
         for (const key of sources?.manual ?? []) {
-          if (typeof key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(key)) manual.add(key)
+          if (accepts(key)) manual.add(key)
         }
         const auto = new Set()
         for (const key of sources?.auto ?? []) {
-          if (typeof key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(key) && !manual.has(key)) auto.add(key)
+          if (accepts(key) && !manual.has(key)) auto.add(key)
         }
-        const fixed = new Set()
-        for (const key of fixedHolidayDateKeys(sources?.years ?? [])) {
-          if (!manual.has(key) && !auto.has(key)) fixed.add(key)
-        }
-        return { auto: [...auto].sort(), manual: [...manual].sort(), fixed: [...fixed].sort() }
+        return { auto: [...auto].sort(), manual: [...manual].sort(), fixed: [] }
       }
 
       /**
@@ -634,33 +569,44 @@ window.__ModuleLoader__.load({
        * @param {unknown} payload - parsed JSON body.
        * @param {number} year - requested year; entries outside it are ignored.
        * @returns {{ date: string, name: string }[]} sorted, de-duplicated entries.
+       * @throws {Error} for business errors, unknown shapes, or malformed entries.
+       * Valid empty arrays/calendars are successful responses, not fetch failures.
        */
       function holidayEntriesFromPayload(payload, year) {
         const entries = []
         const push = (date, name) => {
-          if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return
+          if (!isHolidayDate(date)) throw new Error('holiday calendar contains an invalid date')
           if (!date.startsWith(`${year}-`)) return
           entries.push({ date, name: typeof name === 'string' ? name : '' })
+        }
+        if (payload !== null && typeof payload === 'object' && Object.hasOwn(payload, 'code') && payload.code !== 0) {
+          throw new Error('holiday source reported an unsuccessful response code')
         }
         if (Array.isArray(payload)) {
           for (const entry of payload) {
             if (typeof entry === 'string') push(entry, '')
             else if (entry !== null && typeof entry === 'object') push(entry.date, typeof entry.localName === 'string' ? entry.localName : entry.name)
+            else throw new Error('holiday calendar contains an invalid entry')
           }
         } else if (payload !== null && typeof payload === 'object') {
           if (Array.isArray(payload.dates)) {
             for (const entry of payload.dates) {
               if (typeof entry === 'string') push(entry, '')
               else if (entry !== null && typeof entry === 'object') push(entry.date, entry.name)
+              else throw new Error('holiday calendar contains an invalid entry')
             }
           } else if (payload.holiday !== null && typeof payload.holiday === 'object' && !Array.isArray(payload.holiday)) {
             for (const [key, entry] of Object.entries(payload.holiday)) {
-              if (entry === null || typeof entry !== 'object' || entry.holiday !== true) continue
+              if (entry === null || typeof entry !== 'object' || typeof entry.holiday !== 'boolean') {
+                throw new Error('holiday calendar contains an invalid entry')
+              }
               const date = typeof entry.date === 'string' ? entry.date : /^\d{2}-\d{2}$/.test(key) ? `${year}-${key}` : undefined
+              if (!isHolidayDate(date)) throw new Error('holiday calendar contains an invalid date')
+              if (entry.holiday === false) continue
               push(date, entry.name)
             }
-          }
-        }
+          } else throw new Error('holiday calendar payload shape is not recognized')
+        } else throw new Error('holiday calendar payload shape is not recognized')
         const byDate = new Map()
         for (const entry of entries) {
           const previous = byDate.get(entry.date)
@@ -688,7 +634,7 @@ window.__ModuleLoader__.load({
         MINUTES_PER_DAY,
         MINUTE_MS,
         DAY_MS,
-        FIXED_HOLIDAYS,
+        isHolidayDate,
         pad2,
         dateKeyAt,
         beijingDateKey,
@@ -700,8 +646,6 @@ window.__ModuleLoader__.load({
         bandAt,
         nextBandSwitch,
         holidayYears,
-        fixedHolidayDateKeys,
-        fixedHolidayEntries,
         holidayDatesForYears,
         holidayProvenance,
         provenanceDates,
@@ -1021,7 +965,7 @@ window.__ModuleLoader__.load({
           ? t('pricing.holidaysMissingLate')
           : t('pricing.holidaysMissing')
         : provenance.known
-          ? t('hint.holidaysProvenance', { auto: provenance.auto, manual: provenance.manual, fixed: provenance.fixed })
+          ? t(provenance.fixed > 0 ? 'hint.holidaysProvenanceLegacy' : 'hint.holidaysProvenance', { auto: provenance.auto, manual: provenance.manual, fixed: provenance.fixed })
           : pricing.holidaysSource === 'auto'
             ? t('hint.holidaysAuto', { count: holidayCount })
             : t('hint.holidaysManual', { count: holidayCount })

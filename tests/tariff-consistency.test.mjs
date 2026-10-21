@@ -64,7 +64,6 @@ const CONSTANTS = [
   'MINUTES_PER_DAY',
   'MINUTE_MS',
   'DAY_MS',
-  'FIXED_HOLIDAYS',
 ]
 for (const name of CONSTANTS) {
   assert.deepEqual(hostTariff[name], canonical[name], `Host copy constant ${name}`)
@@ -181,8 +180,7 @@ for (const [name, iso] of VECTORS) {
   assert.equal(tokenCostClient.bandAt(timeMs, { ...canonicalPolicy, offPeakEnabled: false }), 'peak', `client off-peak disabled ${name}`)
 }
 
-// Unpublished years: the fixed anchors fill the calendar for the Session's own
-// Beijing years, so the clock and the Host agree instead of one billing peak.
+// Unpublished dates are never estimated; ordinary weekend/window rules apply.
 {
   const years = [2028, 2029]
   const unpublishedProvenance = canonical.holidayProvenance({ years })
@@ -190,12 +188,12 @@ for (const [name, iso] of VECTORS) {
   const unpublishedPolicy = { ...canonicalPolicy, holidays: unpublishedHolidays }
   const clockDates2028 = canonical.holidayDatesForYears([], years)
   for (const [iso, expected] of [
-    ['2028-05-01T02:00:00Z', 'offPeak'], // Monday, inside the estimated 劳动节 block
-    ['2028-05-02T02:00:00Z', 'offPeak'], // the estimate spans the whole statutory block
-    ['2028-05-08T02:00:00Z', 'peak'], // the week after the estimated block is a normal weekday
-    ['2028-10-02T02:00:00Z', 'offPeak'], // National Day is estimated as a seven-day block
-    ['2028-10-09T02:00:00Z', 'peak'], // the block ends on 10-07
-    ['2028-10-01T02:00:00Z', 'offPeak'], // Sunday anyway, but the anchor is present
+    ['2028-05-01T02:00:00Z', 'peak'], // Monday without a confirmed calendar entry
+    ['2028-05-02T02:00:00Z', 'peak'],
+    ['2028-05-08T02:00:00Z', 'peak'],
+    ['2028-10-02T02:00:00Z', 'peak'],
+    ['2028-10-09T02:00:00Z', 'peak'],
+    ['2028-10-01T02:00:00Z', 'offPeak'], // Sunday still uses the weekend rule
   ]) {
     const timeMs = at(iso)
     assert.equal(canonical.bandAt(timeMs, unpublishedPolicy), expected, `canonical unpublished-year ${iso}`)
@@ -230,15 +228,15 @@ for (const iso of ['2026-10-19T03:59:00Z', '2026-10-19T05:30:00Z', '2026-10-23T0
 }
 
 // ---------------------------------------------------------------------------
-// Holiday calendar: names, anchors, provenance, unpublished years
+// Holiday calendar: names, provenance, unpublished dates
 // ---------------------------------------------------------------------------
 
-// Fixed anchors fill years that no source published; published dates win.
+// Only dates supplied by the source are present.
 {
   const dates = canonical.holidayDatesForYears([{ date: '2026-10-01', name: '国庆节' }], [2026, 2028])
-  assert.equal(dates['2026-10-01'], '国庆节', 'published name wins over the fixed anchor')
-  assert.equal(dates['2026-05-01'], '劳动节', 'manual/unpublished anchors are added')
-  assert.equal(dates['2028-01-01'], '元旦', 'unpublished year gets anchors')
+  assert.equal(dates['2026-10-01'], '国庆节', 'published name is preserved')
+  assert.equal(dates['2026-05-01'], undefined, 'unknown days are not estimated')
+  assert.equal(dates['2028-01-01'], undefined, 'unknown years are not estimated')
   assert.deepEqual(Object.keys(clockHelpers.holidayDatesForYears([{ date: '2026-10-01', name: '国庆节' }], [2026, 2028])).sort(), Object.keys(dates).sort(), 'clock calendar matches canonical')
 }
 
@@ -253,30 +251,21 @@ for (const iso of ['2026-10-19T03:59:00Z', '2026-10-19T05:30:00Z', '2026-10-23T0
   }
   assert.deepEqual(provenance.manual, [...manual].sort(), 'manual wins over auto for a shared date')
   assert.ok(provenance.auto.includes('2026-10-02'), 'auto keeps its unique dates')
-  // The fixed bucket is every statutory anchor day that neither source published.
-  const anchors = canonical.fixedHolidayDateKeys([2026, 2027])
-  const published = new Set([...manual, ...auto])
-  assert.deepEqual(provenance.fixed, anchors.filter((date) => !published.has(date)), 'fixed buckets cover only unpublished dates')
-  assert.ok(provenance.fixed.includes('2026-10-03'), 'an unpublished day inside a statutory block is still estimated')
-  assert.ok(!provenance.fixed.includes('2026-10-02'), 'a published day is not also a fixed anchor')
+  assert.deepEqual(provenance.fixed, [], 'the compatibility field contains no new estimates')
   assert.deepEqual(canonical.provenanceDates(provenance), [...new Set([...manual, ...auto, ...provenance.fixed])].sort(), 'union matches the calendar')
 }
 
-// The frozen Host snapshot for an unpublished year carries fixed anchors, so
-// token-cost and the clock agree instead of one charging peak.
+// A Host snapshot without published data has no holiday overrides.
 {
   const settings = internals.resolveSettings({ pricingSource: false })
   const catalog = internals.createPricingCatalog(settings)
   const snapshot2028 = catalog.snapshotFor(at('2028-06-01T00:00:00Z'))
-  assert.ok(snapshot2028.holidays.includes('2028-05-01'), 'frozen snapshot carries the 2028 fixed anchor')
-  const fixed = snapshot2028.holidayProvenance?.fixed ?? []
-  assert.ok(fixed.includes('2028-05-01'), 'frozen snapshot reports the fixed provenance')
-  assert.equal(internals.bandOf(at('2028-05-01T02:00:00Z'), snapshot2028), 'offPeak', 'Host treats an unpublished-year anchor as off-peak')
-  assert.equal(internals.bandOf(at('2028-05-02T02:00:00Z'), snapshot2028), 'offPeak', 'Host covers the whole estimated statutory block')
-  assert.equal(internals.bandOf(at('2028-05-08T02:00:00Z'), snapshot2028), 'peak', 'the week after the estimate stays peak')
-  assert.equal(clockHelpers.bandAt(at('2028-05-01T02:00:00Z'), canonical.holidayDatesForYears([], [2028])), 'offPeak', 'clock agrees on unpublished-year anchors')
-  assert.equal(clockHelpers.bandAt(at('2028-05-02T02:00:00Z'), canonical.holidayDatesForYears([], [2028])), 'offPeak', 'clock agrees on the estimated block')
-  assert.equal(clockHelpers.bandAt(at('2028-05-08T02:00:00Z'), canonical.holidayDatesForYears([], [2028])), 'peak', 'clock still peaks the next week')
+  assert.deepEqual(snapshot2028.holidays, [])
+  assert.deepEqual(snapshot2028.holidayProvenance.fixed, [])
+  for (const iso of ['2028-05-01T02:00:00Z', '2028-05-02T02:00:00Z', '2028-05-08T02:00:00Z']) {
+    assert.equal(internals.bandOf(at(iso), snapshot2028), 'peak', 'Host uses ordinary weekday pricing')
+    assert.equal(clockHelpers.bandAt(at(iso), {}), 'peak', 'clock uses the same weekday pricing')
+  }
 }
 
 // The published calendar flows from the source payload into the same keys in
@@ -302,7 +291,7 @@ for (const iso of ['2026-10-19T03:59:00Z', '2026-10-19T05:30:00Z', '2026-10-23T0
 // ---------------------------------------------------------------------------
 
 {
-  const dates = canonical.holidayDatesForYears([], [2026, 2027])
+  const dates = canonical.holidayDatesForYears(AUTO_DATES.map((date) => ({ date, name: '国庆节' })), [2026])
   // 2026-10-01 is a Thursday: the next holiday on/after 2026-09-28 is National Day.
   const holiday = clockHelpers.nextHoliday(at('2026-09-28T02:00:00Z'), dates)
   assert.equal(holiday.key, '2026-10-01')
@@ -312,7 +301,7 @@ for (const iso of ['2026-10-19T03:59:00Z', '2026-10-19T05:30:00Z', '2026-10-23T0
   assert.equal(today.today, true)
   // Off-peak decisions match a policy carrying the same date map.
   for (const [name, iso, expected] of VECTORS) {
-    assert.equal(clockHelpers.bandAt(at(iso), dates), expected, `clock anchors agree: ${name}`)
+    assert.equal(clockHelpers.bandAt(at(iso), dates), expected, `clock confirmed calendar agrees: ${name}`)
   }
 }
 

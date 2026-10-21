@@ -279,7 +279,7 @@ for (const expected of [
   '高峰窗口',
   '判定基准',
   '官方价目表',
-  '节假日日历',
+  '本年度暂无已知节假日',
   '本会话最早的一段费率生效于',
   '当前最新费率读取于',
   '费率按请求发生时间取当时有效的价格',
@@ -315,7 +315,8 @@ for (const expected of [
   assert.ok(output.includes(localWindows), `rendered output should include local windows ${localWindows}: ${output}`)
   assert.ok(output.includes(zone), `rendered output should name the system zone ${zone}: ${output}`)
 }
-assert.ok(output.includes('尚未获取'), 'an empty calendar explains that it has not been fetched yet')
+assert.ok(output.includes('不预估假期'), 'an empty calendar explains that dates are not estimated')
+assert.ok(output.includes('按周末和峰谷时段计费'), 'an empty calendar retains normal billing rules')
 assert.ok(!output.includes('{'), `no unresolved placeholders in rendered text: ${output}`)
 
 const tEn = (key, params = {}) => {
@@ -368,14 +369,14 @@ const holidayView = {
   pricing: { ...view.pricing, holidays: ['2026-10-19'], holidaysSource: 'auto', holidayProvenance: { auto: ['2026-10-19'], manual: [], fixed: [] } },
 }
 const holidayOutput = render(holidayView)
-assert.ok(!holidayOutput.includes('未配置节假日'), 'no holiday warning once a calendar is configured')
+assert.ok(!holidayOutput.includes('暂无已知节假日'), 'no holiday warning once a calendar is configured')
 assert.ok(holidayOutput.includes('自动 1 天'), `a provenance calendar reports its automatic size: ${holidayOutput}`)
 assert.ok(holidayOutput.includes('手动 0 天'), 'the provenance line reports the manual count')
-assert.ok(holidayOutput.includes('固定锚点 0 天'), 'the provenance line reports the fixed-anchor count')
+assert.ok(!holidayOutput.includes('固定锚点'), 'current calendars do not advertise estimates')
 
-// Fixed anchors become visible once the canonical module supplies them.
+// Old snapshots identify estimates as historical data.
 const fixedView = { ...view, pricing: { ...view.pricing, holidays: ['2027-01-01', '2026-10-19'], holidaysSource: 'auto', holidayProvenance: { auto: ['2026-10-19'], manual: [], fixed: ['2027-01-01'] } } }
-assert.ok(render(fixedView).includes('固定锚点 1 天'), 'fixed anchors are counted when present')
+assert.ok(render(fixedView).includes('旧版估算 1 天'), 'historical estimates remain inspectable')
 
 // An older snapshot without provenance still reports the legacy source label.
 const legacyHolidayPricing = { ...view.pricing, holidays: ['2026-10-19'], holidaysSource: 'auto' }

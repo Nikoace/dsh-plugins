@@ -1,0 +1,16 @@
+{
+  "name": "dompurify",
+  "version": "3.4.17",
+  "files": [
+    {
+      "file": "purify.es.mjs",
+      "url": "https://unpkg.com/dompurify@3.4.17/dist/purify.es.mjs",
+      "sha256": "60c5d5ccbb466de3de3ba863461a92bf134f8c156cef7992da43e0f659bc5cbd"
+    },
+    {
+      "file": "LICENSE-DOMPurify",
+      "url": "https://unpkg.com/dompurify@3.4.17/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  ]
+}

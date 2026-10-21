@@ -1,15 +1,18 @@
 # DSH Plugins
 
-Two Web UI plugins and one Host-side tool plugin for **DeepSeek Harness** (DSH), plus the notes
+Three Web UI plugins and one Host-side tool plugin for **DeepSeek Harness** (DSH), plus the notes
 and offline test harnesses used to build them.
 
 | Plugin | Version | What it does |
 |---|---|---|
 | [`dsh-sidebar-clock`](dsh-sidebar-clock/README.md) | 1.1.0 | One card at the top of the sidebar: local clock, live deepseek peak/off-peak band, countdowns to the next weekend and the next Chinese public holiday, and the signed-in account balance. |
-| [`dsh-token-cost`](dsh-token-cost/README.md) | 1.5.0 | Prices the current Session in real time from the official DeepSeek rate card, with the currency following the interface language (CNY from the zh-CN page, USD from the English page, each at its own published price) and each request priced at the rate in force when it ran (a price change splits the timeline instead of freezing the conversation), separating peak/off-peak, cache-hit/cache-miss/cache-write input and output, a per-request breakdown dialog with the rate timeline and a sub-agent total, live staleness/degradation status, a holiday calendar with fixed-anchor fallback, and a separate report of excluded gateways (magpie/codex) that are billed elsewhere. |
+| [`dsh-token-cost`](dsh-token-cost/README.md) | 1.5.0 | Prices the current Session in real time from the official DeepSeek rate card, with the currency following the interface language (CNY from the zh-CN page, USD from the English page, each at its own published price) and each request priced at the rate in force when it ran (a price change splits the timeline instead of freezing the conversation), separating peak/off-peak, cache-hit/cache-miss/cache-write input and output, a per-request breakdown dialog with the rate timeline and a sub-agent total, live staleness/degradation status, a current-year holiday calendar without unpublished-date estimates, and a separate report of excluded gateways (magpie/codex) that are billed elsewhere. |
+| [`dsh-html-preview`](dsh-html-preview/README.md) | 0.1.1 | Static HTML/CSS previews below completed replies, with source/copy controls. Does not remove HTML from model context; live-installed in the desktop profile, browser enforcement remains unverified. |
 | [`dsh-github`](dsh-github/README.md) | 1.1.0 | Adds model-facing GitHub tools (repository search and metadata, issues, pull requests and diffs, commits, files) plus a Settings → GitHub page for the token, default repository, and write policy; writes stay opt-in and approval-gated by default. |
 
-The two UI plugins are additive: they register into official slots (`sidebar.footer.action`,
+HTML previews are provided by [`dsh-html-preview`](dsh-html-preview/README.md) 0.1.1 through `conversation.chat.turnTail`. It is **preview-only**: HTML remains in later model context. The bundle is installed in the desktop profile and its `html-preview` entry is active in the live slot; browser enforcement checks remain unverified.
+
+The existing clock and cost UI plugins are additive: they register into official slots (`sidebar.footer.action`,
 `conversation.composer.dock`) and never replace the stock sidebar or composer. `dsh-github` is
 Host-only: it registers `github_*` tools on `ctx.tools` and has no UI surface.
 
@@ -20,6 +23,7 @@ dsh-plugins/
 ├─ .github/workflows/ci.yml # CI: npm test on windows-latest, Node 22.15 and 24
 ├─ dsh-sidebar-clock/     # bundle: index.js (host), client.js (web UI), patch, locale, icon
 ├─ dsh-token-cost/        # bundle: host-side pricing/projection + client pill and dialog
+├─ dsh-html-preview/      # bundle: static HTML/CSS preview cards in completed replies
 ├─ dsh-github/            # Host-only bundle: github_* tools over the GitHub REST API
 ├─ docs/
 │  ├─ compatibility.md                 # DSH shell/adapter compatibility matrix and upgrade checklist

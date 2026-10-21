@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Static HTML preview",
+    "description": "Preview HTML and CSS beneath assistant replies, view and copy source, without executing scripts. HTML is not removed from subsequent model context."
+  }
+}

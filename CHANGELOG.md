@@ -9,6 +9,27 @@ publishable package.
 
 ## [Unreleased]
 
+### HTML preview
+
+- Fixed `dsh-html-preview` 0.1.1 CSS fidelity: keep `>` child combinators and range
+  media queries, preserve `id` attributes so `#id` CSS and aria references resolve,
+  and support `var()` / `--*` custom properties. The CSS helpers moved to `core.js`
+  and gained pure unit tests in `tests/html-preview-css.test.mjs`.
+- Added `dsh-html-preview` 0.1.0: static HTML/CSS cards below final assistant replies,
+  source/copy/expand controls, DOMPurify, restricted CSS and isolated iframe CSP.
+- This release is preview-only: HTML remains in model history. The original pre-step
+  filtering plan was invalid; see [context findings](docs/html-preview-context.md).
+- Added deterministic offline client assembly and pinned sanitizer provenance/license.
+  Live installation, visual checks and browser enforcement validation remain pending.
+
+### Changed
+
+- Holiday policy (2026-10-21): `dsh-token-cost` and `dsh-sidebar-clock` fetch only the current
+  Beijing year's calendar, never estimate unpublished dates, and reject business errors or malformed
+  calendars without replacing good data. The clock uses a current-year v2 cache and shows `暂无` /
+  `none known` if no known holiday remains. Token-cost preserves billed checkpoint history and adds
+  a policy boundary for subsequent requests. See [implementation notes](docs/holiday-policy-2026-10-21.md).
+
 ### Added
 
 - `dsh-token-cost` 1.4.0: **CNY pricing from the zh-CN price page** (the page the account is billed

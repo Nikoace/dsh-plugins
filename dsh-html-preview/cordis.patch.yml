@@ -1,0 +1,3 @@
+- insert:
+    - id: html-preview
+      name: '@local/dsh-html-preview'

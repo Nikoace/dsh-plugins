@@ -65,6 +65,11 @@ publishable package.
 
 ### Fixed
 
+- `dsh-github`: isolate pending GET responses, ETag revalidation and rate-limit state by
+  credential generation (R1); reject stale or cancelled reads. Recheck all three write
+  tools after approval and immediately before HTTP dispatch, invalidating pending writes
+  across policy revoke/restore transitions (R4). Added 47 offline security regressions;
+  see [validation and remaining boundaries](docs/github-security-fixes-2026-10-21.md).
 - `dsh-token-cost`: per-bucket rows are now the rounded integers the total is summed from, so
   `sum(bucketMicros) === micros` holds exactly per band, per model and per epoch (the per-epoch split
   exposed a one-micro drift).

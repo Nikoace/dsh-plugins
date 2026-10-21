@@ -1,6 +1,6 @@
 // Offline observations supporting ../code-review-2026-10-21.md.
 // Run from any directory: node <path-to-this-file>
-// R2/R5/R6 now assert the holiday fixes; the other assertions pin reviewed defects.
+// R1/R4 and R2/R5/R6 now assert fixes; the other assertions pin reviewed defects.
 // No network, real credentials, profile writes, or production code changes.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -18,7 +18,7 @@ const jsonResponse = (value, etag = '"review"') => new Response(JSON.stringify(v
 })
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 
-// R1: an older authenticated response can refill the cleared anonymous cache.
+// R1 FIXED: an older authenticated response cannot refill the anonymous cache.
 {
   let token = 'synthetic-review-token'
   let releaseOld
@@ -34,17 +34,18 @@ const tick = () => new Promise((resolve) => setImmediate(resolve))
     },
   })
   const oldRequest = client.json('/repos/example/private')
+  const rejectedOldRequest = assert.rejects(oldRequest, /credentials changed/)
   await tick()
   assert.equal(typeof releaseOld, 'function')
   token = ''
   await client.json('/repos/example/public')
   releaseOld()
-  await oldRequest
+  await rejectedOldRequest
   const anonymousResult = await client.json('/repos/example/private')
-  assert.equal(anonymousResult.fromCache, true)
-  assert.equal(anonymousResult.data.private, true)
-  assert.equal(requests, 2)
-  record('R1', { anonymousReceivedPrivateCachedData: true, networkRequests: requests })
+  assert.equal(anonymousResult.fromCache, false)
+  assert.equal(anonymousResult.data.private, false)
+  assert.equal(requests, 3)
+  record('R1', { fixed: true, anonymousReceivedPrivateCachedData: false, networkRequests: requests })
 }
 
 // R2 FIXED: an explicit non-holiday is not replaced with an estimate.
@@ -92,7 +93,7 @@ const message = (time, attempt = false) => ({
   record('R3', { peakCalls: view.peak.calls, offPeakCalls: view.offPeak.calls, actualMicros: view.micros, expectedMicros: 6_000_000 })
 }
 
-// R4: disabling writes while an approval is pending does not block the POST.
+// R4 FIXED: disabling writes while approval is pending blocks the POST.
 {
   const raw = { allowWrites: true, requireApproval: true }
   const config = resolveConfig(raw, {})
@@ -105,13 +106,14 @@ const message = (time, attempt = false) => ({
   const pending = tools.find((tool) => tool.name === 'github_comment').execute(
     { repo: 'example/project', number: 1, body: 'offline fixture' }, { agent: {}, signal: undefined },
   )
+  const rejectedWrite = assert.rejects(pending, /GitHub writes are disabled/)
   await tick()
   assert.equal(typeof approve, 'function')
   raw.allowWrites = false
   approve('allowed-once')
-  await pending
-  assert.equal(writes, 1)
-  record('R4', { allowWritesAtPost: config.allowWrites, postsSent: writes })
+  await rejectedWrite
+  assert.equal(writes, 0)
+  record('R4', { fixed: true, allowWritesAfterApproval: config.allowWrites, postsSent: writes })
 }
 
 // R5 FIXED: one year is fetched; a failed refresh leaves the saved calendar intact.
@@ -202,4 +204,4 @@ const message = (time, attempt = false) => ({
   record('R8', { originalMicros: oldAmount, fullRebuildMicros: rebuiltAmount, persistedStateRestoreMicros: restoredAmount })
 }
 
-console.log(JSON.stringify({ mode: 'offline review observations; R2/R5/R6 verify fixes, other findings remain open', results }, null, 2))
+console.log(JSON.stringify({ mode: 'offline review observations; R1/R2/R4/R5/R6 verify fixes; R3/R7/R8 remain open', results }, null, 2))

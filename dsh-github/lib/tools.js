@@ -90,6 +90,21 @@ function outputFor(render, maxOutputChars) {
  */
 export function createGithubTools({ config, client, ctx }) {
   const maxOutputChars = () => config.maxOutputChars
+  let writePolicyGeneration = 0
+  let allowWrites = config.allowWrites
+  let requireApproval = config.requireApproval
+
+  /** Observe transitions, including revoke/restore between async checkpoints. */
+  const syncWritePolicy = () => {
+    const nextAllowWrites = config.allowWrites
+    const nextRequireApproval = config.requireApproval
+    if (allowWrites !== nextAllowWrites || requireApproval !== nextRequireApproval) {
+      writePolicyGeneration += 1
+      allowWrites = nextAllowWrites
+      requireApproval = nextRequireApproval
+    }
+  }
+  ctx.on?.('loader/volatile-update', syncWritePolicy)
 
   /**
    * Resolve the target repository for a call.
@@ -119,15 +134,25 @@ export function createGithubTools({ config, client, ctx }) {
    * @param {string} toolName - tool name shown to the approval UI.
    * @param {object} exec - tool run context.
    * @param {{ en: string, zh: string }} reason - bilingual approval reason.
-   * @returns {Promise<void>}
+   * @returns {Promise<() => void>} final synchronous policy/cancellation guard.
    */
   const ensureWriteAllowed = async (toolName, exec, reason) => {
-    if (!config.allowWrites) {
-      throw new Error(
-        'GitHub writes are disabled. Set allowWrites: true in the dsh-github plugin config (keep requireApproval: true so every write is confirmed) to enable ' + toolName + '.',
-      )
+    syncWritePolicy()
+    const generation = writePolicyGeneration
+    const check = () => {
+      syncWritePolicy()
+      if (exec.signal?.aborted) throw new Error('GitHub write cancelled; no request was sent.')
+      if (!allowWrites) {
+        throw new Error(
+          'GitHub writes are disabled. Set allowWrites: true in the dsh-github plugin config (keep requireApproval: true so every write is confirmed) to enable ' + toolName + '.',
+        )
+      }
+      if (generation !== writePolicyGeneration) {
+        throw new Error('GitHub write policy changed while this operation was pending; no request was sent. Retry under the current policy.')
+      }
     }
-    if (!config.requireApproval) return
+    check()
+    if (!requireApproval) return check
     let approval
     try {
       approval = ctx.get('approval')
@@ -153,22 +178,29 @@ export function createGithubTools({ config, client, ctx }) {
       throw new Error(`GitHub write approval failed: ${error instanceof Error ? error.message : String(error)}`)
     }
     if (outcome !== 'allowed-once') throw new Error(`GitHub write was not approved (${outcome}); no change was made.`)
+    check()
+    return check
   }
 
   /**
-   * Guard one write with the same repo/tool title every tool needs.
+   * Authorize and dispatch every write through the same final-check path.
    *
    * @param {string} toolName - tool name.
    * @param {object} exec - tool run context.
    * @param {string} repo - target repository.
    * @param {string} action - action text, e.g. `create issue "title"`.
-   * @returns {Promise<void>}
+   * @param {string} path - API path.
+   * @param {object} body - JSON payload.
+   * @returns {Promise<object>} HTTP response.
    */
-  const guardWrite = (toolName, exec, repo, action) =>
-    ensureWriteAllowed(toolName, exec, {
+  const writeJson = async (toolName, exec, repo, action, path, body) => {
+    const beforeSend = await ensureWriteAllowed(toolName, exec, {
       en: `GitHub: ${action} in ${repo}`,
       zh: `GitHub：在 ${repo} ${action}`,
     })
+    beforeSend()
+    return client.json(path, { method: 'POST', body, signal: exec.signal, beforeSend })
+  }
 
   /** @type {object[]} */
   const tools = []
@@ -681,12 +713,11 @@ export function createGithubTools({ config, client, ctx }) {
       const body = optionalText(args, 'body')
       const labels = stringArray(args, 'labels').slice(0, 20)
       const assignees = stringArray(args, 'assignees').slice(0, 10)
-      await guardWrite('github_create_issue', exec, repo, `create issue "${title.slice(0, 120)}"`)
       const payload = { title }
       if (body.length > 0) payload.body = body
       if (labels.length > 0) payload.labels = labels
       if (assignees.length > 0) payload.assignees = assignees
-      const response = await client.json(`/repos/${repo}/issues`, { method: 'POST', body: payload, signal: exec.signal })
+      const response = await writeJson('github_create_issue', exec, repo, `create issue "${title.slice(0, 120)}"`, `/repos/${repo}/issues`, payload)
       const issue = response.data ?? {}
       return {
         action: 'created-issue',
@@ -720,12 +751,7 @@ export function createGithubTools({ config, client, ctx }) {
       const repo = await repoOf(args, exec)
       const number = positiveInteger(args, 'number')
       const body = requireText(args, 'body')
-      await guardWrite('github_comment', exec, repo, `comment on #${number}`)
-      const response = await client.json(`/repos/${repo}/issues/${number}/comments`, {
-        method: 'POST',
-        body: { body },
-        signal: exec.signal,
-      })
+      const response = await writeJson('github_comment', exec, repo, `comment on #${number}`, `/repos/${repo}/issues/${number}/comments`, { body })
       const comment = response.data ?? {}
       return {
         action: 'created-comment',
@@ -764,12 +790,11 @@ export function createGithubTools({ config, client, ctx }) {
       const head = requireText(args, 'head')
       const base = requireText(args, 'base')
       const body = optionalText(args, 'body')
-      await guardWrite('github_create_pull_request', exec, repo, `create pull request "${title.slice(0, 120)}"`)
       const payload = { title, head, base }
       if (body.length > 0) payload.body = body
       if (args.draft === true) payload.draft = true
       if (typeof args.maintainerCanModify === 'boolean') payload.maintainer_can_modify = args.maintainerCanModify
-      const response = await client.json(`/repos/${repo}/pulls`, { method: 'POST', body: payload, signal: exec.signal })
+      const response = await writeJson('github_create_pull_request', exec, repo, `create pull request "${title.slice(0, 120)}"`, `/repos/${repo}/pulls`, payload)
       const pull = response.data ?? {}
       return {
         action: 'created-pull-request',

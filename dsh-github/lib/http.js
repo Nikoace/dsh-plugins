@@ -130,6 +130,14 @@ export function createHttpClient(config, deps = {}) {
   const cache = new Map()
   let lastRateLimit = null
   let lastToken = config.token
+  let credentialGeneration = 0
+
+  /** Invalidate even when a credential changes away and back to the same value. */
+  function invalidateCredentials() {
+    credentialGeneration += 1
+    cache.clear()
+    lastRateLimit = null
+  }
 
   /**
    * Resolve the credential for one request. A stored credential can change
@@ -149,6 +157,29 @@ export function createHttpClient(config, deps = {}) {
   }
 
   /**
+   * Take a credential snapshot. A lookup that overlapped an invalidation must
+   * be repeated: its late result must not restore an older token/generation.
+   * The generation is process-local; tokens never enter cache keys or errors.
+   *
+   * @param {() => void} [checkActive] - cancellation/deadline check.
+   * @returns {Promise<{ token: string, generation: number }>}
+   */
+  async function credentialSnapshot(checkActive = () => {}) {
+    for (;;) {
+      checkActive()
+      const startedGeneration = credentialGeneration
+      const token = await effectiveToken()
+      checkActive()
+      if (startedGeneration !== credentialGeneration) continue
+      if (token !== lastToken) {
+        invalidateCredentials()
+        lastToken = token
+      }
+      return { token, generation: credentialGeneration }
+    }
+  }
+
+  /**
    * Request one API resource.
    *
    * @param {string} path - API path starting with `/`.
@@ -160,6 +191,7 @@ export function createHttpClient(config, deps = {}) {
    * @param {AbortSignal} [options.signal] - caller cancellation.
    * @param {boolean} [options.raw] - return text instead of parsed JSON.
    * @param {boolean} [options.noCache] - bypass the GET cache.
+   * @param {() => void} [options.beforeSend] - synchronous final authorization check, after credential lookup and immediately before fetch.
    * @returns {Promise<{ data: unknown, text: string, status: number, url: string, headers: Record<string, string>, rateLimit: object | null, fromCache: boolean }>} response.
    */
   async function request(path, options = {}) {
@@ -167,11 +199,22 @@ export function createHttpClient(config, deps = {}) {
     const url = buildUrl(config.apiBaseUrl, path, options.query)
     const accept = options.accept ?? DEFAULT_ACCEPT
     const isGet = method === 'GET'
-    const token = await effectiveToken()
-    if (token !== lastToken) {
-      cache.clear()
-      lastToken = token
+    const callerSignal = options.signal
+    let timeoutFired = false
+    const checkActive = () => {
+      if (callerSignal?.aborted) throw new Error(`GitHub request cancelled (${method} ${path})`)
+      if (timeoutFired) {
+        throw new GitHubApiError(`GitHub request timed out after ${config.requestTimeoutMs} ms (${method} ${path})`, { method, path })
+      }
     }
+    const { token, generation } = await credentialSnapshot(checkActive)
+    const checkCredential = () => {
+      if (generation !== credentialGeneration) {
+        throw new GitHubApiError(`GitHub credentials changed during request (${method} ${path}); retry with the current credentials.`, { method, path })
+      }
+    }
+    checkActive()
+    checkCredential()
     const cacheKey = `${method} ${url} ${accept}`
     const useCache = isGet && config.cacheTtlSeconds > 0 && options.noCache !== true
     const cached = useCache ? cache.get(cacheKey) : undefined
@@ -191,13 +234,11 @@ export function createHttpClient(config, deps = {}) {
     if (cached !== undefined && cached.etag.length > 0) headers['If-None-Match'] = cached.etag
 
     const controller = new AbortController()
-    let timeoutFired = false
     const timer = setTimeout(() => {
       timeoutFired = true
       controller.abort()
     }, config.requestTimeoutMs)
 
-    const callerSignal = options.signal
     const forwardAbort = () => controller.abort()
     if (callerSignal !== undefined) {
       if (callerSignal.aborted) controller.abort()
@@ -212,13 +253,19 @@ export function createHttpClient(config, deps = {}) {
 
     let response
     try {
-      response = await fetchImpl(url, {
+      const init = {
         method,
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: controller.signal,
         redirect: 'follow',
-      })
+      }
+      // No await between this check and transport dispatch. Every write tool
+      // supplies the same policy guard, including when approval is disabled.
+      options.beforeSend?.()
+      checkActive()
+      checkCredential()
+      response = await fetchImpl(url, init)
     } catch (error) {
       cleanup()
       if (callerSignal?.aborted) throw new Error(`GitHub request cancelled (${method} ${path})`)
@@ -233,7 +280,16 @@ export function createHttpClient(config, deps = {}) {
 
     let bodyText
     try {
+      checkActive()
       bodyText = await response.text()
+      checkActive()
+      if (isGet) {
+        // Also detect changes when no other request has resolved the token.
+        // Keep the deadline/listener until this final async step settles.
+        await credentialSnapshot(checkActive)
+        checkActive()
+        checkCredential()
+      }
     } catch (error) {
       cleanup()
       if (callerSignal?.aborted) throw new Error(`GitHub request cancelled (${method} ${path})`)
@@ -243,6 +299,7 @@ export function createHttpClient(config, deps = {}) {
           path,
         })
       }
+      if (error instanceof GitHubApiError) throw error
       throw new GitHubApiError(`GitHub response could not be read: ${errorMessage(error)} (${method} ${path})`, {
         method,
         path,
@@ -251,7 +308,7 @@ export function createHttpClient(config, deps = {}) {
     }
     cleanup()
     const rateLimit = parseRateLimit(response.headers)
-    if (rateLimit !== null) lastRateLimit = rateLimit
+    if (rateLimit !== null && generation === credentialGeneration) lastRateLimit = rateLimit
     const requestId = headerOf(response.headers, 'x-github-request-id')
     const headerRecord = {}
     if (typeof response.headers.forEach === 'function') {
@@ -356,7 +413,9 @@ export function createHttpClient(config, deps = {}) {
     /** @returns {object | null} the most recently observed rate-limit facts. */
     rateLimit: () => lastRateLimit,
     /** @returns {Promise<string>} the bearer token currently in effect (never rendered). */
-    getToken: effectiveToken,
+    getToken: async () => (await credentialSnapshot()).token,
+    /** Called synchronously on committed credential-store changes. */
+    invalidateCredentials,
     /** @returns {number} cached GET responses. */
     cacheSize: () => cache.size,
     /** @returns {object} resolved configuration (including the token; never serialize). */

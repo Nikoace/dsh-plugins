@@ -36,12 +36,18 @@
 | R1，11 项 | A → 匿名（有/无中间请求）、A → B → A、迟到响应与限额隔离、304 失效与取消、响应体取消、已取消的缓存命中、凭证读取取消、乱序凭证读取、宿主更新通知跨响应/凭证读取 |
 | R4，36 项 | 三个工具 × 三个等待阶段（审批、审批后的凭证读取、免审批的凭证读取）× 四种变化（关闭、关闭再恢复、取消、审批策略来回切换）；撤销操作均为 0 POST，恢复后新操作可以正常审批并发送 |
 | `node tools/run-tests.mjs github` | 4 个脚本通过；Host 共 149 项（原有 102 + 新增 47），另有设置页和令牌帮助测试 |
-| `npm test` | 退出码 0；runner 报告 15 passed / 0 failed。实际 14 个脚本完成断言、1 个脚本 SKIP，见下方说明 |
+| 本地 Linux `npm test` | 退出码 0；runner 报告 15 passed / 0 failed。实际 14 个脚本完成断言、1 个脚本 SKIP，见下方说明 |
 | 会话 fixture 回放 | 176 次调用回放通过 |
 | `node docs/review-evidence/2026-10-21.mjs` | 8 组断言通过；R1 匿名重新请求并取得公开响应，networkRequests = 3；R4 postsSent = 0 |
 | `git diff --check` | 通过 |
 
 完整测试中的跳过项为 `sidebar-clock-client-harness.cjs`：本环境未安装 DSH `app.asar`，不能执行真实安装包的 SlotCore 激活/卸载验证。runner 把退出码 0 的 SKIP 也计为 PASS，不能将结果解读为 15 个脚本都完成实际断言。
+
+### 提交后的 Windows CI
+
+修复提交 `c12368b74bede67dac36591ce153db6880ec88f0` 的 [PR CI](https://github.com/Nikoace/dsh-plugins/actions/runs/39575008385) 在 Node **22.15.1** 和 **24.21.0** 上均通过全部四个 GitHub 测试脚本（新增 47 项和原有 102 项 Host 用例均通过）。但两套完整测试都以退出码 1 结束：`html-preview-bundle.test.mjs` 报 `Vendor hash mismatch: purify.es.mjs`；runner 为 14 passed / 1 failed，其中仍包含一个安装包 SKIP。
+
+核对 [主分支基点的 CI](https://github.com/Nikoace/dsh-plugins/actions/runs/39549504434/job/119055226708)，在本次修改之前就有完全相同的 vendor 哈希错误。此次没有修改 HTML preview 或降低完整性校验；该已有 CI 失败仍需单独修复。**本地完整测试通过不等于远端完整 CI 通过。**
 
 离线证据脚本已把 R1/R4 从“固定缺陷表现”调整为“验证修复结果”。历史审查内容继续保留，并明确标注状态。R3、R7、R8 不属于本次修复。
 

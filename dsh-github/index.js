@@ -94,6 +94,11 @@ export function apply(ctx, rawConfig) {
   }
 
   const client = createHttpClient(config, { logger: ctx.logger, tokenProvider })
+  // Invalidate on each committed update, including A -> B -> A between reads.
+  // Config/environment tokens are static and take precedence over the store.
+  ctx.on?.('credentials/reference-updated', (ref) => {
+    if (config.token.length === 0 && ref === config.tokenEnv) client.invalidateCredentials()
+  })
   const tools = createGithubTools({ config, client, ctx })
 
   for (const tool of tools) ctx.tools.register(tool)

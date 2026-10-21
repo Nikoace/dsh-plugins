@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.15 is the hard floor: the replay harness uses zlib.zstdDecompressSync,
+        # which was added in Node 22.15. 24 is the current LTS line.
+        node:
+          - '22.15'
+          - '24'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The bundles stay dependency-free, so there is no install step. The asar
+      # harnesses print SKIP and exit 0 on a runner without the DSH desktop app.
+      - name: Run test suite
+        run: npm test

@@ -5,8 +5,14 @@ package-lock.json
 # Logs and local artifacts
 *.log
 *.tmp
+.tmp-*
+.acl-recovery/
+.audit-usage/
 .DS_Store
 Thumbs.db
+
+# Build output (tools/pack.mjs)
+dist/
 
 # Local-only files
 .env

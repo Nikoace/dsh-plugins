@@ -1,0 +1,17 @@
+{
+  "name": "dsh-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local DeepSeek Harness plugin bundles: sidebar clock, token cost, and GitHub tools, with their offline test harnesses.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "test": "node tools/run-tests.mjs",
+    "pack": "node tools/pack.mjs",
+    "sync:shared": "node tools/sync-shared.mjs",
+    "build:html-preview": "node tools/build-html-preview.mjs"
+  }
+}
